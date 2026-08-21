@@ -1,0 +1,2383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formwork — 3D Modeler</title>
+<link rel="icon" type="image/x-icon" href="data:image/x-icon;base64,AAABAAEAEBAAAAAAIAAqAwAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/YQAAAvFJREFUeJx1k0to3FUUxn/3/u9kXv/JZDKZTNPJwxgLRqRSQVtUHNyrC4tu3BRBqOJC0GVgFHztiiKKCEoQdBFERFQ01FpFUUHEhprGDJaZ5mESJs5kJpnX/97jIkwbgn67c873fYtzzgeHIIIq5PMGIKJBPmBkf6K4UNjv/ycEVCGPAbVfv2Tu/uLp2+bnZh7eqL51ckbexAegIFoK6J5OAUgBrV5UDgQpMPrb+vjMJ/+MPnlxO6397DHJ39qv7oouLz+gf37BPFf80O5rNeCUgFIgUiBWKqefmdsZf/7bxtHMyl44GIhom0oltI6lbTKZipzMtjllL83fsf3VjDnX/CUQlBJQ9TOR+z7du/mdz+pj00u7UfH7TDtqnFlbX8Vax9TUMRLJQUd0UMZzI+HjQdFVfv36iWc/X5g1CuT8Tuzxdyuj0zWJNdJRHa7Vts1iqcR2pUoi2c9WdY+JXFaPT0xSqRZ3375yOf7X35UTwKwBaDmv2d5ruK7tmPLWjrpaLpOMGV55qI/7b2nKuR+1+nJ5laHdMmdTRe+9dlo2+o822VjDAChBa621WEel1uDUqMdHpy1jgx1BhHtP7/Hq92kuFKNcCk2y6E8o3WpqgOt3dc4hTqE8TV+rze8LlkROVDOAN5YizJW6mFSO1zcccdPFBV2uG4h1zjlxIgIiiAibmy3qRjizMMg3KyH8OGSiu/jG4KwWa63r3RLliGultBMXCEhEQyamiIUcO10hFHYY5RCBTmADZ52y1sV7BqrU8OYarc5V43m+Q+lkn9iJqCVqEBEHysP3k1ZEBBE/6LZrLuhcBJQGeOq7zfnL17buDIL2a3FPOj/VIuHZtbjVHm4gEXcDqSEbjkTD4qzX7Xbeb9erJ1bLSx8femUcwPDw8PG6Db3cJvTgPekuncgQK7sK7TrnrQ0K6+U/f+DAKx/Mk8rnb6QtdyT3SOLI1OLI5O1/jN00/dgN2qNeb3f/B90j5DMZP5vNxg8EzztM/hfGNV1mWcyfBAAAAABJRU5ErkJggg==">
+<style>
+  :root{
+    --bg-0:#15161a;
+    --bg-1:#1c1e24;
+    --bg-2:#24262e;
+    --bg-3:#2d303a;
+    --line:#383b46;
+    --text-0:#eceef2;
+    --text-1:#a4a8b5;
+    --text-2:#6b6f7d;
+    --accent:#ff8a3d;
+    --accent-dim:#4a3624;
+    --accent-glow:rgba(255,138,61,0.35);
+    --green:#5ec98f;
+    --blue:#5b9dd9;
+    --red:#e8636b;
+    --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    width:100%; height:100%; overflow:hidden;
+    background:var(--bg-0);
+    color:var(--text-0);
+    font-family:var(--font-ui);
+    font-size:13px;
+    -webkit-font-smoothing:antialiased;
+  }
+  #app{
+    display:grid;
+    grid-template-columns: 220px 1fr 260px;
+    grid-template-rows: 48px 1fr 130px;
+    grid-template-areas:
+      "topbar topbar topbar"
+      "left canvas right"
+      "left timeline right";
+    width:100vw; height:100vh;
+  }
+
+  /* ---------- TOPBAR ---------- */
+  #topbar{
+    grid-area: topbar;
+    display:flex; align-items:center;
+    padding:0 16px;
+    background:var(--bg-1);
+    border-bottom:1px solid var(--line);
+    gap:18px;
+    z-index:10;
+  }
+  .brand{
+    display:flex; align-items:center; gap:8px;
+    font-weight:700; font-size:14px; letter-spacing:0.2px;
+    color:var(--text-0);
+    padding-right:14px;
+    border-right:1px solid var(--line);
+    margin-right:2px;
+  }
+  .brand svg{ width:18px; height:18px; }
+  .brand img{ width:22px; height:22px; display:block; object-fit:contain; }
+  .brand .tag{
+    font-family:var(--font-mono);
+    font-size:9px; color:var(--accent);
+    background:var(--accent-dim);
+    padding:2px 6px; border-radius:3px;
+    letter-spacing:0.5px;
+    margin-left:2px;
+  }
+  .tool-group{ display:flex; gap:2px; align-items:center; }
+  .tool-btn{
+    display:flex; align-items:center; justify-content:center;
+    width:34px; height:34px;
+    background:transparent;
+    border:1px solid transparent;
+    border-radius:7px;
+    color:var(--text-1);
+    cursor:pointer;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .tool-btn:hover{ background:var(--bg-3); color:var(--text-0); }
+  .tool-btn.active{
+    background:var(--accent-dim);
+    color:var(--accent);
+    border-color:rgba(255,138,61,0.4);
+  }
+  .tool-btn svg{ width:17px; height:17px; }
+  .divider{ width:1px; height:22px; background:var(--line); margin:0 6px; }
+  .topbar-spacer{ flex:1; }
+  .btn{
+    display:flex; align-items:center; gap:6px;
+    padding:7px 13px;
+    background:var(--bg-3);
+    border:1px solid var(--line);
+    border-radius:7px;
+    color:var(--text-0);
+    font-family:var(--font-ui);
+    font-size:12.5px; font-weight:500;
+    cursor:pointer;
+    transition: all .12s;
+  }
+  .btn:hover{ background:#383b46; border-color:#454854; }
+  .btn.primary{
+    background: linear-gradient(180deg, #ff9852, #ff7b26);
+    border-color:transparent;
+    color:#20140a;
+    font-weight:700;
+  }
+  .btn.primary:hover{ filter:brightness(1.06); }
+  .btn svg{ width:14px; height:14px; }
+  .btn.active{
+    background:var(--accent-dim);
+    border-color:rgba(255,138,61,0.5);
+    color:var(--accent);
+  }
+  .btn:disabled{ opacity:0.35; cursor:not-allowed; pointer-events:none; }
+  #edit-sub-toolbar{ align-items:center; }
+  .edit-mode-badge{
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    display:none;
+    align-items:center; gap:6px;
+    font-family:var(--font-mono); font-size:10.5px; letter-spacing:0.4px;
+    color:var(--accent);
+    background:var(--accent-dim);
+    border:1px solid rgba(255,138,61,0.4);
+    padding:4px 10px; border-radius:12px;
+    pointer-events:none;
+  }
+  .edit-mode-badge.show{ display:flex; }
+  .edit-mode-badge .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent); }
+
+  /* ---------- LEFT: Add / Outliner ---------- */
+  #left{
+    grid-area:left;
+    background:var(--bg-1);
+    border-right:1px solid var(--line);
+    display:flex; flex-direction:column;
+    overflow:hidden;
+  }
+  .panel-section{
+    border-bottom:1px solid var(--line);
+    display:flex; flex-direction:column;
+  }
+  .panel-header{
+    padding:10px 12px 6px;
+    font-size:10.5px; font-weight:700;
+    letter-spacing:0.8px; text-transform:uppercase;
+    color:var(--text-2);
+  }
+  .primitive-grid{
+    display:grid; grid-template-columns:1fr 1fr;
+    gap:6px; padding:0 10px 12px;
+  }
+  .prim-btn{
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+    padding:10px 4px 8px;
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    color:var(--text-1);
+    cursor:pointer;
+    transition: all .12s;
+  }
+  .prim-btn:hover{ background:var(--bg-3); color:var(--text-0); border-color:#454854; transform:translateY(-1px); }
+  .prim-btn svg{ width:22px; height:22px; }
+  .prim-btn span{ font-size:10.5px; font-weight:500; }
+
+  #outliner{
+    flex:1; overflow-y:auto;
+    padding:4px 6px;
+  }
+  .outliner-item{
+    display:flex; align-items:center; gap:7px;
+    padding:6px 8px;
+    border-radius:6px;
+    cursor:pointer;
+    color:var(--text-1);
+    font-size:12.5px;
+    user-select:none;
+  }
+  .outliner-item:hover{ background:var(--bg-2); }
+  .outliner-item.selected{ background:var(--accent-dim); color:var(--accent); }
+  .outliner-item svg{ width:13px; height:13px; flex-shrink:0; opacity:0.8; }
+  .outliner-item .name{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .outliner-item .swatch{
+    width:10px; height:10px; border-radius:3px; flex-shrink:0;
+    border:1px solid rgba(255,255,255,0.15);
+  }
+  .outliner-item .vis-toggle{
+    width:16px; height:16px; opacity:0.5; cursor:pointer; flex-shrink:0;
+  }
+  .outliner-item .vis-toggle:hover{ opacity:1; }
+  .empty-hint{
+    padding:24px 16px; text-align:center;
+    color:var(--text-2); font-size:12px; line-height:1.6;
+  }
+
+  /* ---------- CENTER: Canvas ---------- */
+  #canvas-wrap{
+    grid-area:canvas;
+    position:relative;
+    background:
+      radial-gradient(ellipse at 50% 30%, #1e2027 0%, var(--bg-0) 70%);
+    overflow:hidden;
+  }
+  #three-canvas{ display:block; width:100%; height:100%; }
+
+  .viewport-badge{
+    position:absolute; top:12px; left:14px;
+    display:flex; gap:8px; align-items:center;
+    font-family:var(--font-mono); font-size:11px;
+    color:var(--text-2);
+    pointer-events:none;
+  }
+  .axis-gizmo-label{
+    position:absolute; top:12px; right:14px;
+    font-family:var(--font-mono); font-size:10px;
+    color:var(--text-2);
+    text-align:right; line-height:1.5;
+    pointer-events:none;
+  }
+  .front-badge{
+    position:absolute; top:44px; right:14px;
+    display:flex; align-items:center; gap:5px;
+    font-family:var(--font-mono); font-size:10px; letter-spacing:0.3px;
+    color:var(--accent);
+    background:var(--accent-dim);
+    border:1px solid rgba(255,138,61,0.4);
+    padding:4px 8px; border-radius:6px;
+    pointer-events:none;
+  }
+  .front-badge svg{ width:12px; height:12px; }
+  .viewport-hint{
+    position:absolute; bottom:12px; left:14px;
+    font-size:11px; color:var(--text-2);
+    display:flex; gap:14px;
+    pointer-events:none;
+  }
+  .viewport-hint kbd{
+    font-family:var(--font-mono);
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    padding:1px 5px; border-radius:3px;
+    color:var(--text-1);
+    font-size:10px;
+  }
+  #empty-state{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:10px; pointer-events:none;
+    color:var(--text-2);
+  }
+  #empty-state svg{ width:48px; height:48px; opacity:0.35; }
+  #empty-state .t1{ font-size:14px; color:var(--text-1); font-weight:600; }
+  #empty-state .t2{ font-size:12px; }
+
+  /* ---------- RIGHT: Inspector ---------- */
+  #right{
+    grid-area:right;
+    background:var(--bg-1);
+    border-left:1px solid var(--line);
+    overflow-y:auto;
+    display:flex; flex-direction:column;
+  }
+  .insp-empty{
+    padding:40px 20px; text-align:center;
+    color:var(--text-2); font-size:12px; line-height:1.7;
+  }
+  .insp-section{
+    border-bottom:1px solid var(--line);
+    padding:12px 14px 14px;
+  }
+  .insp-title-row{
+    display:flex; align-items:center; gap:8px;
+    margin-bottom:10px;
+  }
+  .insp-name-input{
+    flex:1;
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:6px 9px;
+    color:var(--text-0);
+    font-size:12.5px;
+    font-family:var(--font-ui);
+    font-weight:600;
+  }
+  .insp-name-input:focus{ outline:none; border-color:var(--accent); }
+  .del-btn{
+    width:28px; height:28px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--bg-2); border:1px solid var(--line);
+    border-radius:6px; color:var(--text-2); cursor:pointer;
+  }
+  .del-btn:hover{ background:rgba(232,99,107,0.15); border-color:var(--red); color:var(--red); }
+  .del-btn svg{ width:14px; height:14px; }
+
+  .field-label{
+    font-size:10px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase;
+    color:var(--text-2); margin:12px 0 6px;
+  }
+  .field-label:first-child{ margin-top:0; }
+  .xyz-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  .xyz-field{
+    display:flex; align-items:center;
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    border-radius:6px;
+    overflow:hidden;
+  }
+  .xyz-field .axis{
+    width:18px; text-align:center;
+    font-size:10px; font-weight:700; font-family:var(--font-mono);
+    flex-shrink:0;
+  }
+  .xyz-field.x .axis{ color:#e8636b; }
+  .xyz-field.y .axis{ color:#5ec98f; }
+  .xyz-field.z .axis{ color:#5b9dd9; }
+  .xyz-field input{
+    width:100%; background:transparent; border:none; outline:none;
+    color:var(--text-0); font-family:var(--font-mono); font-size:11.5px;
+    padding:6px 4px 6px 0;
+    min-width:0;
+  }
+  .xyz-field input::-webkit-inner-spin-button{ -webkit-appearance:none; }
+
+  .color-row{ display:flex; gap:8px; align-items:center; }
+  .color-swatch-input{
+    width:36px; height:32px; border-radius:6px;
+    border:1px solid var(--line);
+    background:none; cursor:pointer; padding:0;
+    -webkit-appearance:none;
+  }
+  .color-swatch-input::-webkit-color-swatch-wrapper{ padding:2px; }
+  .color-swatch-input::-webkit-color-swatch{ border-radius:4px; border:none; }
+  .hex-input{
+    flex:1; background:var(--bg-2); border:1px solid var(--line);
+    border-radius:6px; padding:7px 9px;
+    color:var(--text-0); font-family:var(--font-mono); font-size:12px;
+  }
+  .hex-input:focus{ outline:none; border-color:var(--accent); }
+
+  .swatch-presets{ display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .swatch-preset{
+    width:20px; height:20px; border-radius:5px; cursor:pointer;
+    border:1px solid rgba(255,255,255,0.12);
+    transition: transform .1s;
+  }
+  .swatch-preset:hover{ transform:scale(1.15); }
+
+  .slider-row{ display:flex; align-items:center; gap:10px; margin-top:4px; }
+  .slider-row input[type=range]{
+    flex:1; accent-color:var(--accent);
+    height:4px;
+  }
+  .slider-val{
+    font-family:var(--font-mono); font-size:11px; color:var(--text-1);
+    width:38px; text-align:right;
+  }
+
+  select.mat-select{
+    width:100%; background:var(--bg-2); border:1px solid var(--line);
+    border-radius:6px; padding:7px 9px; color:var(--text-0);
+    font-family:var(--font-ui); font-size:12px; cursor:pointer;
+  }
+  select.mat-select:focus{ outline:none; border-color:var(--accent); }
+
+  .scene-stats{
+    margin-top:auto;
+    padding:12px 14px;
+    font-family:var(--font-mono); font-size:10.5px;
+    color:var(--text-2);
+    border-top:1px solid var(--line);
+    display:flex; justify-content:space-between;
+  }
+
+  /* ---------- BOTTOM: Timeline / status strip ---------- */
+  #timeline{
+    grid-area:timeline;
+    background:var(--bg-1);
+    border-right:1px solid var(--line);
+    border-top:1px solid var(--line);
+    padding:10px 14px;
+    overflow-y:auto;
+  }
+  .tl-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;}
+  .tl-title{ font-size:10.5px; font-weight:700; letter-spacing:0.8px; text-transform:uppercase; color:var(--text-2); }
+  .snap-toggle{
+    display:flex; align-items:center; gap:6px;
+    font-size:11px; color:var(--text-1); cursor:pointer;
+  }
+  .switch{
+    width:30px; height:16px; background:var(--bg-3); border-radius:20px;
+    position:relative; border:1px solid var(--line); cursor:pointer; flex-shrink:0;
+  }
+  .switch.on{ background:var(--accent-dim); border-color:var(--accent); }
+  .switch::after{
+    content:''; position:absolute; top:1px; left:1px;
+    width:12px; height:12px; border-radius:50%;
+    background:var(--text-2);
+    transition: all .15s;
+  }
+  .switch.on::after{ background:var(--accent); left:15px; }
+
+  .quick-tips{
+    display:flex; flex-wrap:wrap; gap:8px 18px;
+    font-size:11px; color:var(--text-2);
+  }
+  .quick-tips b{ color:var(--text-1); }
+
+  /* Export modal */
+  #export-overlay{
+    position:fixed; inset:0; background:rgba(10,10,12,0.6);
+    display:none; align-items:center; justify-content:center; z-index:100;
+    backdrop-filter: blur(3px);
+  }
+  #export-overlay.show{ display:flex; }
+  .modal{
+    width:380px; background:var(--bg-1); border:1px solid var(--line);
+    border-radius:12px; padding:22px; box-shadow:0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal h3{ font-size:15px; margin-bottom:4px; }
+  .modal p{ font-size:12px; color:var(--text-1); margin-bottom:16px; line-height:1.5; }
+  .format-opts{ display:flex; gap:8px; margin-bottom:18px; }
+  .format-opt{
+    flex:1; padding:12px 8px; text-align:center;
+    background:var(--bg-2); border:1px solid var(--line); border-radius:8px;
+    cursor:pointer; transition:all .12s;
+  }
+  .format-opt.selected{ border-color:var(--accent); background:var(--accent-dim); }
+  .format-opt .fmt-name{ font-weight:700; font-size:13px; color:var(--text-0); }
+  .format-opt .fmt-desc{ font-size:10.5px; color:var(--text-2); margin-top:2px; }
+  .modal-actions{ display:flex; gap:8px; justify-content:flex-end; }
+
+  ::-webkit-scrollbar{ width:9px; height:9px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+  ::-webkit-scrollbar-thumb{ background:#3a3d48; border-radius:5px; }
+  ::-webkit-scrollbar-thumb:hover{ background:#4a4d5a; }
+
+  .toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--bg-3); border:1px solid var(--line);
+    padding:10px 18px; border-radius:8px; font-size:12.5px;
+    display:flex; align-items:center; gap:8px;
+    opacity:0; transition: all .25s; pointer-events:none; z-index:200;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast svg{ width:15px; height:15px; color:var(--green); }
+  .toast.error{ border-color:rgba(232,99,107,0.5); }
+  .toast.error svg{ color:var(--red); }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- TOPBAR -->
+  <div id="topbar">
+    <div class="brand">
+      <img src="data:image/png;base64,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" alt="Formwork logo">
+      Formwork <span class="tag">BETA</span>
+    </div>
+    <div class="tool-group">
+      <div class="tool-btn active" data-tool="translate" title="Move (W)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M2 12h20M5 9l-3 3 3 3M19 9l3 3-3 3M9 5l3-3 3 3M9 19l3 3 3-3"/></svg>
+      </div>
+      <div class="tool-btn" data-tool="rotate" title="Rotate (E)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+      </div>
+      <div class="tool-btn" data-tool="scale" title="Scale (R)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 L13 11 M21 3 L21 9 M21 3 L15 3"/><rect x="3" y="13" width="8" height="8" rx="1"/></svg>
+      </div>
+      <div class="divider"></div>
+      <div class="tool-btn" data-tool="local" title="Toggle local/world space">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><path d="M10 6.5h4M6.5 10v4"/></svg>
+      </div>
+      <div class="divider"></div>
+      <button class="btn" id="btn-edit-mode" title="Toggle Edit Mode (Tab)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        Edit Mode
+      </button>
+    </div>
+    <div class="tool-group" id="edit-sub-toolbar" style="display:none;">
+      <div class="divider"></div>
+      <div class="tool-btn active" data-selmode="vertex" title="Vertex select (1)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="5" r="1.8" fill="currentColor"/><circle cx="19" cy="5" r="1.8" fill="currentColor"/><circle cx="5" cy="19" r="1.8" fill="currentColor"/><circle cx="19" cy="19" r="1.8" fill="currentColor"/><path d="M5 5h14M5 5v14M19 5v14M5 19h14" opacity="0.45"/></svg>
+      </div>
+      <div class="tool-btn" data-selmode="edge" title="Edge select (2)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 5h14M5 5v14M19 5v14M5 19h14"/></svg>
+      </div>
+      <div class="tool-btn" data-selmode="face" title="Face select (3)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="5" width="14" height="14" rx="1" fill="currentColor" opacity="0.3" stroke="currentColor"/></svg>
+      </div>
+      <div class="divider"></div>
+      <button class="btn" id="btn-extrude" title="Extrude selected faces/edges (Ctrl+E)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h10v10H4z" opacity="0.4"/><path d="M10 10h10v10H10z"/><path d="M4 4l6 6M14 4l6 6M4 14l6 6M14 14l6 6" opacity="0.5"/></svg>
+        Extrude
+      </button>
+      <button class="btn" id="btn-loopcut" title="Loop cut selected edge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1" opacity="0.5"/><path d="M12 3v18" stroke-dasharray="2 2"/></svg>
+        Loop Cut
+      </button>
+    </div>
+    <div class="topbar-spacer"></div>
+    <button class="btn" id="btn-undo" title="Undo (Ctrl+Z)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-6.7"/></svg>
+      Undo
+    </button>
+    <button class="btn" id="btn-duplicate" title="Duplicate (Shift+D)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+      Duplicate
+    </button>
+    <button class="btn" id="btn-import">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/></svg>
+      Import
+    </button>
+    <input type="file" id="file-import" accept=".glb,.gltf,.obj" style="display:none">
+    <button class="btn" id="btn-load-project" title="Load a saved project (.json)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-8l-2-2H5a2 2 0 0 0-2 2z"/></svg>
+      Load
+    </button>
+    <input type="file" id="file-load-project" accept=".json" style="display:none">
+    <button class="btn" id="btn-save-project" title="Save project (Ctrl+S)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+      Save
+    </button>
+    <button class="btn primary" id="btn-export">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+      Export GLB
+    </button>
+  </div>
+
+  <!-- LEFT PANEL -->
+  <div id="left">
+    <div class="panel-section">
+      <div class="panel-header">Add Mesh</div>
+      <div class="primitive-grid">
+        <div class="prim-btn" data-prim="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 Z"/><path d="M4 6.5 12 11 20 6.5M12 11v11"/></svg><span>Cube</span></div>
+        <div class="prim-btn" data-prim="sphere"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="9" ry="3.4"/><path d="M12 3v18"/></svg><span>Sphere</span></div>
+        <div class="prim-btn" data-prim="cylinder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.66 3.58 3 8 3s8-1.34 8-3v-13"/></svg><span>Cylinder</span></div>
+        <div class="prim-btn" data-prim="cone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="19" rx="8" ry="3"/><path d="M12 2 4 19M12 2l8 17"/></svg><span>Cone</span></div>
+        <div class="prim-btn" data-prim="torus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="12" rx="9" ry="5.5"/><ellipse cx="12" cy="12" rx="3.2" ry="1.9"/></svg><span>Torus</span></div>
+        <div class="prim-btn" data-prim="plane"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8 12 4 21 8 12 12 Z"/></svg><span>Plane</span></div>
+      </div>
+    </div>
+    <div class="panel-section" style="flex:1; min-height:0; display:flex; flex-direction:column; border-bottom:none;">
+      <div class="panel-header">Scene Outliner</div>
+      <div id="outliner"></div>
+    </div>
+  </div>
+
+  <!-- CANVAS -->
+  <div id="canvas-wrap">
+    <canvas id="three-canvas"></canvas>
+    <div id="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 Z"/><path d="M4 6.5 12 11 20 6.5M12 11v11"/></svg>
+      <div class="t1">Empty scene</div>
+      <div class="t2">Add a shape from the left panel to start modeling</div>
+    </div>
+    <div class="viewport-badge">Perspective</div>
+    <div class="axis-gizmo-label">X <span style="color:#e8636b">red</span> · Y <span style="color:#5ec98f">green</span> · Z <span style="color:#5b9dd9">blue</span></div>
+    <div class="front-badge" id="front-badge" title="Press F for front view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg><span>FRONT (+Z)</span></div>
+    <div class="edit-mode-badge" id="edit-mode-badge"><span class="dot"></span><span id="edit-mode-badge-text">EDIT MODE — Vertex</span></div>
+    <div class="viewport-hint" id="viewport-hint-object">
+      <span><kbd>W</kbd> Move</span>
+      <span><kbd>E</kbd> Rotate</span>
+      <span><kbd>R</kbd> Scale</span>
+      <span><kbd>Del</kbd> Delete</span>
+      <span><kbd>Shift+D</kbd> Duplicate</span>
+      <span><kbd>Tab</kbd> Edit mode</span>
+      <span><kbd>F</kbd> Front view</span>
+      <span><kbd>Ctrl+S</kbd> Save · <kbd>Ctrl+O</kbd> Load</span>
+      <span>Drag to orbit · Scroll to zoom</span>
+      <span><kbd>Shift</kbd>+Drag empty space to box-select</span>
+    </div>
+    <div class="viewport-hint" id="viewport-hint-edit" style="display:none;">
+      <span><kbd>1</kbd> Vertex</span>
+      <span><kbd>2</kbd> Edge</span>
+      <span><kbd>3</kbd> Face</span>
+      <span><kbd>E</kbd> Extrude</span>
+      <span><kbd>Del</kbd> Delete selected</span>
+      <span><kbd>Tab</kbd> Exit edit mode</span>
+      <span>Click loop-cut edge, then drag/click to confirm</span>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div id="right">
+    <div id="inspector-content">
+      <div class="insp-empty">Select an object to edit its transform, color and material.</div>
+    </div>
+    <div class="scene-stats" id="scene-stats">0 objects · 0 tris</div>
+  </div>
+
+  <!-- TIMELINE / STATUS -->
+  <div id="timeline">
+    <div class="tl-header">
+      <div class="tl-title">Viewport</div>
+      <div class="snap-toggle" id="snap-toggle">
+        <span>Snap to grid</span>
+        <div class="switch" id="snap-switch"></div>
+      </div>
+    </div>
+    <div class="quick-tips">
+      <span><b>Gizmo:</b> drag red/green/blue axis to constrain</span>
+      <span><b>Multi-select:</b> Shift-click objects or Shift-drag a box</span>
+      <span><b>Rename:</b> edit name field in inspector</span>
+      <span><b>Export:</b> GLB embeds mesh, transforms & vertex colors</span>
+    </div>
+  </div>
+
+</div>
+
+<div id="export-overlay">
+  <div class="modal">
+    <h3>Export scene</h3>
+    <p>Choose a format to download your model, including transforms and materials.</p>
+    <div class="format-opts">
+      <div class="format-opt selected" data-fmt="glb">
+        <div class="fmt-name">.GLB</div>
+        <div class="fmt-desc">Binary, single file</div>
+      </div>
+      <div class="format-opt" data-fmt="gltf">
+        <div class="fmt-name">.GLTF</div>
+        <div class="fmt-desc">JSON + embedded</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="export-cancel">Cancel</button>
+      <button class="btn primary" id="export-confirm">Download</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+  <span id="toast-msg">Exported successfully</span>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+// ---------------- SCENE SETUP ----------------
+const canvas = document.getElementById('three-canvas');
+const wrap = document.getElementById('canvas-wrap');
+
+const scene = new THREE.Scene();
+scene.background = null;
+
+const camera = new THREE.PerspectiveCamera(50, wrap.clientWidth / wrap.clientHeight, 0.1, 1000);
+camera.position.set(5.5, 4.5, 6.5);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+// Lighting
+const hemi = new THREE.HemisphereLight(0x9fb4d1, 0x1a1a1e, 0.9);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xfff2e0, 1.6);
+key.position.set(6, 9, 4);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -10; key.shadow.camera.right = 10;
+key.shadow.camera.top = 10; key.shadow.camera.bottom = -10;
+key.shadow.bias = -0.0015;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x5b7fd9, 0.35);
+fill.position.set(-5, 3, -5);
+scene.add(fill);
+
+// Grid + ground
+const grid = new THREE.GridHelper(20, 20, 0x4a4d5a, 0x2a2c34);
+grid.position.y = 0;
+scene.add(grid);
+
+const groundGeo = new THREE.PlaneGeometry(200, 200);
+const groundMat = new THREE.ShadowMaterial({ opacity: 0.28 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+ground.position.y = -0.001;
+scene.add(ground);
+
+// Front-of-scene marker (points toward +Z, the "front" of the model as seen from the front view)
+const frontMarkerGroup = new THREE.Group();
+const frontArrowShaft = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.03, 0.03, 1.0, 12),
+  new THREE.MeshBasicMaterial({ color: 0xff8a3d })
+);
+frontArrowShaft.rotation.x = Math.PI / 2;
+frontArrowShaft.position.z = 0.5;
+const frontArrowHead = new THREE.Mesh(
+  new THREE.ConeGeometry(0.09, 0.24, 12),
+  new THREE.MeshBasicMaterial({ color: 0xff8a3d })
+);
+frontArrowHead.rotation.x = Math.PI / 2;
+frontArrowHead.position.z = 1.12;
+frontMarkerGroup.add(frontArrowShaft, frontArrowHead);
+frontMarkerGroup.position.set(0, 0.02, 9.2);
+scene.add(frontMarkerGroup);
+
+function makeTextSprite(text) {
+  const cnv = document.createElement('canvas');
+  const ctx = cnv.getContext('2d');
+  cnv.width = 256; cnv.height = 64;
+  ctx.font = 'bold 40px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ff8a3d';
+  ctx.fillText(text, 128, 32);
+  const tex = new THREE.CanvasTexture(cnv);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(1.6, 0.4, 1);
+  sprite.renderOrder = 999;
+  return sprite;
+}
+const frontLabelSprite = makeTextSprite('FRONT');
+frontLabelSprite.position.set(0, 0.55, 9.2);
+scene.add(frontLabelSprite);
+
+// Controls
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true;
+orbit.dampingFactor = 0.08;
+orbit.target.set(0, 0.5, 0);
+orbit.update();
+
+const transformControls = new TransformControls(camera, renderer.domElement);
+transformControls.setSpace('world');
+scene.add(transformControls.getHelper ? transformControls.getHelper() : transformControls);
+transformControls.addEventListener('dragging-changed', (e) => { orbit.enabled = !e.value; });
+
+
+// ---------------- STATE ----------------
+let objects = [];      // {id, mesh, name, type, outline}
+let selected = null;   // primary selection (drives inspector + gizmo)
+let selectedSet = new Set(); // ids of all selected objects (multi-select)
+let idCounter = 1;
+let snapEnabled = false;
+const undoStack = [];
+const redoStack = [];
+
+const colorPresets = ['#ff8a3d','#e8636b','#5ec98f','#5b9dd9','#c77dff','#f7d154','#ffffff','#2d303a'];
+
+// Full-scene snapshot for undo/redo (handles add/delete/import, not just transform edits)
+function snapshotScene() {
+  return objects.map(o => ({
+    id: o.id,
+    name: o.name,
+    type: o.type,
+    geomJSON: o.mesh.geometry.toJSON(),
+    pos: o.mesh.position.toArray(),
+    rot: o.mesh.rotation.toArray().slice(0,3),
+    scale: o.mesh.scale.toArray(),
+    color: '#' + o.mesh.material.color.getHexString(),
+    rough: o.mesh.material.roughness,
+    metal: o.mesh.material.metalness,
+    mapImg: o.mesh.material.map ? o.mesh.material.map.image?.src : null
+  }));
+}
+
+function restoreScene(snap) {
+  if (typeof editMode !== 'undefined' && editMode.active) {
+    editMode.active = false;
+    clearEditOverlays();
+    document.getElementById('btn-edit-mode').classList.remove('active');
+    document.getElementById('edit-sub-toolbar').style.display = 'none';
+    document.getElementById('edit-mode-badge').classList.remove('show');
+    document.getElementById('viewport-hint-object').style.display = 'flex';
+    document.getElementById('viewport-hint-edit').style.display = 'none';
+    document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.style.pointerEvents = '');
+  }
+  // clear current
+  objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
+  objects = [];
+  transformControls.detach();
+  selected = null; selectedSet.clear();
+
+  const geoLoader = new THREE.BufferGeometryLoader();
+  snap.forEach(s => {
+    const geo = geoLoader.parse(s.geomJSON);
+    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(s.color), roughness: s.rough, metalness: s.metal, side: s.type==='plane' ? THREE.DoubleSide : THREE.FrontSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.position.fromArray(s.pos);
+    mesh.rotation.set(s.rot[0], s.rot[1], s.rot[2]);
+    mesh.scale.fromArray(s.scale);
+    scene.add(mesh);
+    if (s.mapImg) {
+      new THREE.TextureLoader().load(s.mapImg, (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mat.map = tex; mat.needsUpdate = true; });
+    }
+    objects.push({ id: s.id, mesh, name: s.name, type: s.type });
+  });
+  idCounter = Math.max(1, ...objects.map(o=>o.id), idCounter) + 1;
+  refreshOutliner(); refreshInspector(); refreshEmptyState();
+}
+
+function pushUndo() {
+  undoStack.push(snapshotScene());
+  if (undoStack.length > 25) undoStack.shift();
+  redoStack.length = 0;
+}
+
+function doUndo() {
+  if (undoStack.length === 0) return;
+  redoStack.push(snapshotScene());
+  const snap = undoStack.pop();
+  restoreScene(snap);
+}
+
+function doRedo() {
+  if (redoStack.length === 0) return;
+  undoStack.push(snapshotScene());
+  const snap = redoStack.pop();
+  restoreScene(snap);
+}
+
+function makeGeometry(type) {
+  switch(type){
+    case 'box': return new THREE.BoxGeometry(1,1,1);
+    case 'sphere': return new THREE.SphereGeometry(0.65, 32, 24);
+    case 'cylinder': return new THREE.CylinderGeometry(0.6,0.6,1.2,32);
+    case 'cone': return new THREE.ConeGeometry(0.65,1.3,32);
+    case 'torus': return new THREE.TorusGeometry(0.55,0.22,20,40);
+    case 'plane': return new THREE.PlaneGeometry(1.4,1.4,1,1);
+    default: return new THREE.BoxGeometry(1,1,1);
+  }
+}
+
+const typeLabel = { box:'Cube', sphere:'Sphere', cylinder:'Cylinder', cone:'Cone', torus:'Torus', plane:'Plane', imported:'Import' };
+
+function addPrimitive(type, opts={}, skipSelect=false) {
+  const geo = makeGeometry(type);
+  const color = opts.color || colorPresets[objects.length % colorPresets.length];
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color),
+    roughness: opts.roughness ?? 0.55,
+    metalness: opts.metalness ?? 0.08,
+    map: opts.map || null,
+    side: type==='plane' ? THREE.DoubleSide : THREE.FrontSide
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.position.copy(opts.position || new THREE.Vector3(0, type==='plane'?0:0.65, 0));
+  if (opts.rotation) mesh.rotation.copy(opts.rotation);
+  if (opts.scale) mesh.scale.copy(opts.scale);
+  scene.add(mesh);
+
+  const id = idCounter++;
+  const count = objects.filter(o=>o.type===type).length;
+  const obj = { id, mesh, name: opts.name || `${typeLabel[type]}${count>0?'.'+String(count).padStart(3,'0'):''}`, type };
+  objects.push(obj);
+  if (!skipSelect) selectObject(obj);
+  refreshOutliner();
+  refreshEmptyState();
+  return obj;
+}
+
+function deleteObject(obj) {
+  scene.remove(obj.mesh);
+  obj.mesh.geometry.dispose();
+  obj.mesh.material.dispose();
+  objects = objects.filter(o => o.id !== obj.id);
+  selectedSet.delete(obj.id);
+}
+
+function deleteSelected() {
+  if (selectedSet.size === 0) return;
+  pushUndo();
+  [...selectedSet].forEach(id => {
+    const obj = objects.find(o => o.id === id);
+    if (obj) deleteObject(obj);
+  });
+  transformControls.detach();
+  selected = null; selectedSet.clear();
+  refreshOutliner(); refreshInspector(); refreshEmptyState();
+}
+
+function duplicateObject(obj) {
+  return addPrimitive(obj.type, {
+    color: '#' + obj.mesh.material.color.getHexString(),
+    position: obj.mesh.position.clone().add(new THREE.Vector3(0.6,0,0.6)),
+    rotation: obj.mesh.rotation.clone(),
+    scale: obj.mesh.scale.clone(),
+    map: obj.mesh.material.map || null,
+    roughness: obj.mesh.material.roughness,
+    metalness: obj.mesh.material.metalness
+  }, true);
+}
+
+function duplicateSelected() {
+  if (selectedSet.size === 0) return;
+  pushUndo();
+  const ids = [...selectedSet];
+  const newObjs = ids.map(id => {
+    const obj = objects.find(o => o.id === id);
+    return obj ? duplicateObject(obj) : null;
+  }).filter(Boolean);
+  setSelection(newObjs);
+}
+
+// Proxy group used so the gizmo can move/rotate/scale multiple objects together
+const multiProxy = new THREE.Group();
+scene.add(multiProxy);
+let proxyChildOffsets = []; // {obj, pos, quat, scale} relative snapshot for multi-transform
+
+function setSelection(objArray) {
+  if (typeof editMode !== 'undefined' && editMode.active) exitEditMode();
+  selectedSet = new Set(objArray.map(o => o.id));
+  selected = objArray.length > 0 ? objArray[objArray.length - 1] : null;
+  applySelectionOutlines();
+  attachGizmoToSelection();
+  refreshOutliner();
+  refreshInspector();
+  updateEditModeButtonState();
+}
+
+function updateEditModeButtonState() {
+  const btn = document.getElementById('btn-edit-mode');
+  if (!btn) return;
+  btn.disabled = !(selected && selectedSet.size === 1);
+}
+
+function selectObject(obj, additive=false) {
+  if (!obj) { setSelection([]); return; }
+  if (additive) {
+    const already = selectedSet.has(obj.id);
+    const current = objects.filter(o => selectedSet.has(o.id));
+    if (already) {
+      setSelection(current.filter(o => o.id !== obj.id));
+    } else {
+      setSelection([...current, obj]);
+    }
+  } else {
+    setSelection([obj]);
+  }
+}
+
+function applySelectionOutlines() {
+  objects.forEach(o => {
+    const isSel = selectedSet.has(o.id);
+    o.mesh.material.emissive = o.mesh.material.emissive || new THREE.Color(0);
+    o.mesh.material.emissive.set(isSel ? 0x3a2000 : 0x000000);
+  });
+}
+
+function attachGizmoToSelection() {
+  const selObjs = objects.filter(o => selectedSet.has(o.id));
+  if (selObjs.length === 0) {
+    transformControls.detach();
+  } else if (selObjs.length === 1) {
+    if (multiProxy.children.length) restoreFromProxy();
+    transformControls.attach(selObjs[0].mesh);
+  } else {
+    // compute center, reparent selected meshes under proxy temporarily
+    const center = new THREE.Vector3();
+    selObjs.forEach(o => center.add(o.mesh.position));
+    center.divideScalar(selObjs.length);
+    multiProxy.position.copy(center);
+    multiProxy.rotation.set(0,0,0);
+    multiProxy.scale.set(1,1,1);
+    proxyChildOffsets = selObjs.map(o => ({
+      obj: o,
+      relPos: o.mesh.position.clone().sub(center)
+    }));
+    transformControls.attach(multiProxy);
+  }
+}
+
+function restoreFromProxy() {
+  proxyChildOffsets = [];
+}
+
+// When dragging the proxy, propagate to real objects
+transformControls.addEventListener('objectChange', () => {
+  if (transformControls.object === multiProxy && proxyChildOffsets.length) {
+    proxyChildOffsets.forEach(({obj, relPos}) => {
+      const rotatedOffset = relPos.clone().applyEuler(multiProxy.rotation).multiply(multiProxy.scale);
+      obj.mesh.position.copy(multiProxy.position).add(rotatedOffset);
+    });
+  }
+  updateInspectorTransform();
+});
+
+// ---------------- OUTLINER ----------------
+const outlinerEl = document.getElementById('outliner');
+const iconFor = (type) => {
+  const icons = {
+    box:'<path d="M12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 Z"/><path d="M4 6.5 12 11 20 6.5M12 11v11"/>',
+    sphere:'<circle cx="12" cy="12" r="9"/>',
+    cylinder:'<ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.66 3.58 3 8 3s8-1.34 8-3v-13"/>',
+    cone:'<ellipse cx="12" cy="19" rx="8" ry="3"/><path d="M12 2 4 19M12 2l8 17"/>',
+    torus:'<ellipse cx="12" cy="12" rx="9" ry="5.5"/><ellipse cx="12" cy="12" rx="3.2" ry="1.9"/>',
+    plane:'<path d="M3 8 12 4 21 8 12 12 Z"/>',
+    imported:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/>'
+  };
+  return icons[type] || icons.box;
+};
+
+function refreshOutliner() {
+  if (objects.length === 0) {
+    outlinerEl.innerHTML = `<div class="empty-hint">No objects yet.<br>Add a mesh from the panel above.</div>`;
+    return;
+  }
+  outlinerEl.innerHTML = '';
+  objects.forEach(obj => {
+    const row = document.createElement('div');
+    row.className = 'outliner-item' + (selectedSet.has(obj.id) ? ' selected' : '');
+    row.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${iconFor(obj.type)}</svg>
+      <span class="name">${obj.name}</span>
+      <div class="swatch" style="background:#${obj.mesh.material.color.getHexString()}"></div>
+    `;
+    row.addEventListener('click', (e) => selectObject(obj, e.shiftKey || e.ctrlKey || e.metaKey));
+    outlinerEl.appendChild(row);
+  });
+}
+
+function refreshEmptyState() {
+  document.getElementById('empty-state').style.display = objects.length === 0 ? 'flex' : 'none';
+  updateStats();
+}
+
+function updateStats() {
+  let tris = 0;
+  objects.forEach(o => {
+    const pos = o.mesh.geometry.attributes.position;
+    tris += o.mesh.geometry.index ? o.mesh.geometry.index.count/3 : pos.count/3;
+  });
+  document.getElementById('scene-stats').textContent = `${objects.length} object${objects.length!==1?'s':''} · ${Math.round(tris)} tris`;
+}
+
+// ---------------- INSPECTOR ----------------
+const inspEl = document.getElementById('inspector-content');
+
+function refreshInspector() {
+  if (editMode.active) {
+    const vC = editMode.selectedVerts.size, eC = editMode.selectedEdges.size, fC = editMode.selectedFaces.size;
+    inspEl.innerHTML = `
+      <div class="insp-section">
+        <div class="field-label" style="margin-bottom:8px;">Edit Mode — ${editMode.selMode[0].toUpperCase()+editMode.selMode.slice(1)} select</div>
+        <div class="insp-empty" style="text-align:left; padding:0;">
+          Editing <b style="color:var(--text-0)">${editMode.obj.name}</b><br><br>
+          Verts: ${editMode.verts.length} · Edges: ${editMode.edges.length} · Faces: ${editMode.faces.length}<br>
+          Selected — V:${vC} E:${eC} F:${fC}<br><br>
+          Click to select · Shift-click to add<br>
+          <kbd>E</kbd> extrude selection · <kbd>Del</kbd> delete selection<br>
+          <kbd>Tab</kbd> or <kbd>Esc</kbd> to exit
+        </div>
+      </div>`;
+    return;
+  }
+  if (!selected) {
+    inspEl.innerHTML = `<div class="insp-empty">Select an object to edit its transform, color and material.</div>`;
+    return;
+  }
+  const o = selected;
+  const p = o.mesh.position, r = o.mesh.rotation, s = o.mesh.scale;
+  const hex = '#' + o.mesh.material.color.getHexString();
+  const rough = o.mesh.material.roughness;
+  const metal = o.mesh.material.metalness;
+
+  inspEl.innerHTML = `
+    <div class="insp-section">
+      <div class="insp-title-row">
+        <input class="insp-name-input" id="f-name" value="${o.name}">
+        <div class="del-btn" id="f-delete" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></div>
+      </div>
+
+      <div class="field-label">Position</div>
+      <div class="xyz-row">
+        <div class="xyz-field x"><span class="axis">X</span><input type="number" step="0.1" id="pos-x" value="${p.x.toFixed(2)}"></div>
+        <div class="xyz-field y"><span class="axis">Y</span><input type="number" step="0.1" id="pos-y" value="${p.y.toFixed(2)}"></div>
+        <div class="xyz-field z"><span class="axis">Z</span><input type="number" step="0.1" id="pos-z" value="${p.z.toFixed(2)}"></div>
+      </div>
+
+      <div class="field-label">Rotation (°)</div>
+      <div class="xyz-row">
+        <div class="xyz-field x"><span class="axis">X</span><input type="number" step="1" id="rot-x" value="${THREE.MathUtils.radToDeg(r.x).toFixed(0)}"></div>
+        <div class="xyz-field y"><span class="axis">Y</span><input type="number" step="1" id="rot-y" value="${THREE.MathUtils.radToDeg(r.y).toFixed(0)}"></div>
+        <div class="xyz-field z"><span class="axis">Z</span><input type="number" step="1" id="rot-z" value="${THREE.MathUtils.radToDeg(r.z).toFixed(0)}"></div>
+      </div>
+
+      <div class="field-label">Scale</div>
+      <div class="xyz-row">
+        <div class="xyz-field x"><span class="axis">X</span><input type="number" step="0.1" id="scl-x" value="${s.x.toFixed(2)}"></div>
+        <div class="xyz-field y"><span class="axis">Y</span><input type="number" step="0.1" id="scl-y" value="${s.y.toFixed(2)}"></div>
+        <div class="xyz-field z"><span class="axis">Z</span><input type="number" step="0.1" id="scl-z" value="${s.z.toFixed(2)}"></div>
+      </div>
+    </div>
+
+    <div class="insp-section">
+      <div class="field-label" style="margin-top:0">Color</div>
+      <div class="color-row">
+        <input type="color" class="color-swatch-input" id="f-color" value="${hex}">
+        <input type="text" class="hex-input" id="f-hex" value="${hex}">
+      </div>
+      <div class="swatch-presets" id="preset-row"></div>
+
+      <div class="field-label">Roughness</div>
+      <div class="slider-row">
+        <input type="range" min="0" max="1" step="0.01" id="f-rough" value="${rough}">
+        <span class="slider-val" id="rough-val">${rough.toFixed(2)}</span>
+      </div>
+
+      <div class="field-label">Metalness</div>
+      <div class="slider-row">
+        <input type="range" min="0" max="1" step="0.01" id="f-metal" value="${metal}">
+        <span class="slider-val" id="metal-val">${metal.toFixed(2)}</span>
+      </div>
+
+      <div class="field-label">Texture</div>
+      <div class="color-row">
+        <button class="btn" id="f-tex-upload" style="flex:1; justify-content:center;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          ${o.mesh.material.map ? 'Replace image' : 'Upload image'}
+        </button>
+        ${o.mesh.material.map ? '<div class="del-btn" id="f-tex-clear" title="Remove texture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></div>' : ''}
+      </div>
+      <input type="file" id="f-tex-input" accept="image/*" style="display:none">
+    </div>
+  `;
+
+  // Presets
+  const presetRow = document.getElementById('preset-row');
+  colorPresets.forEach(c => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch-preset';
+    sw.style.background = c;
+    sw.addEventListener('click', () => setColor(c));
+    presetRow.appendChild(sw);
+  });
+
+  // Name
+  document.getElementById('f-name').addEventListener('change', (e) => {
+    o.name = e.target.value || o.name;
+    refreshOutliner();
+  });
+  // Delete
+  document.getElementById('f-delete').addEventListener('click', () => { setSelection([o]); deleteSelected(); });
+
+  // Position/Rotation/Scale live inputs
+  const bindXYZ = (prefix, target, isRot=false) => {
+    ['x','y','z'].forEach(axis => {
+      document.getElementById(`${prefix}-${axis}`).addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (isNaN(v)) return;
+        target[axis] = isRot ? THREE.MathUtils.degToRad(v) : v;
+      });
+    });
+  };
+  bindXYZ('pos', o.mesh.position);
+  bindXYZ('rot', o.mesh.rotation, true);
+  bindXYZ('scl', o.mesh.scale);
+
+  function setColor(hexVal) {
+    o.mesh.material.color.set(hexVal);
+    document.getElementById('f-color').value = hexVal;
+    document.getElementById('f-hex').value = hexVal;
+    refreshOutliner();
+  }
+  document.getElementById('f-color').addEventListener('input', (e) => setColor(e.target.value));
+  document.getElementById('f-hex').addEventListener('change', (e) => {
+    let v = e.target.value.trim();
+    if (!v.startsWith('#')) v = '#' + v;
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) setColor(v);
+  });
+
+  document.getElementById('f-rough').addEventListener('input', (e) => {
+    o.mesh.material.roughness = parseFloat(e.target.value);
+    document.getElementById('rough-val').textContent = parseFloat(e.target.value).toFixed(2);
+  });
+  document.getElementById('f-metal').addEventListener('input', (e) => {
+    o.mesh.material.metalness = parseFloat(e.target.value);
+    document.getElementById('metal-val').textContent = parseFloat(e.target.value).toFixed(2);
+  });
+
+  document.getElementById('f-tex-upload').addEventListener('click', () => document.getElementById('f-tex-input').click());
+  document.getElementById('f-tex-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    new THREE.TextureLoader().load(url, (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      pushUndo();
+      o.mesh.material.map = tex;
+      o.mesh.material.needsUpdate = true;
+      refreshInspector();
+    });
+  });
+  const clearBtn = document.getElementById('f-tex-clear');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    pushUndo();
+    if (o.mesh.material.map) { o.mesh.material.map.dispose(); o.mesh.material.map = null; o.mesh.material.needsUpdate = true; }
+    refreshInspector();
+  });
+}
+
+function updateInspectorTransform() {
+  if (!selected) return;
+  const p = selected.mesh.position, r = selected.mesh.rotation, s = selected.mesh.scale;
+  const set = (id, val) => { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = val; };
+  set('pos-x', p.x.toFixed(2)); set('pos-y', p.y.toFixed(2)); set('pos-z', p.z.toFixed(2));
+  set('rot-x', THREE.MathUtils.radToDeg(r.x).toFixed(0)); set('rot-y', THREE.MathUtils.radToDeg(r.y).toFixed(0)); set('rot-z', THREE.MathUtils.radToDeg(r.z).toFixed(0));
+  set('scl-x', s.x.toFixed(2)); set('scl-y', s.y.toFixed(2)); set('scl-z', s.z.toFixed(2));
+}
+
+// ---------------- TOOLBAR ----------------
+document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tool = btn.dataset.tool;
+    if (tool === 'local') {
+      const space = transformControls.space === 'world' ? 'local' : 'world';
+      transformControls.setSpace(space);
+      btn.classList.toggle('active', space === 'local');
+      return;
+    }
+    document.querySelectorAll('.tool-btn[data-tool]').forEach(b => { if (b.dataset.tool !== 'local') b.classList.remove('active'); });
+    btn.classList.add('active');
+    transformControls.setMode(tool);
+  });
+});
+
+document.querySelectorAll('.prim-btn').forEach(btn => {
+  btn.addEventListener('click', () => { pushUndo(); addPrimitive(btn.dataset.prim); });
+});
+
+document.getElementById('btn-duplicate').addEventListener('click', duplicateSelected);
+document.getElementById('btn-undo').addEventListener('click', doUndo);
+
+// Redo button (added dynamically next to Undo)
+const redoBtn = document.createElement('button');
+redoBtn.className = 'btn';
+redoBtn.id = 'btn-redo';
+redoBtn.title = 'Redo (Ctrl+Y)';
+redoBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M21 13a9 9 0 1 1-3-6.7"/></svg> Redo`;
+document.getElementById('btn-undo').after(redoBtn);
+redoBtn.addEventListener('click', doRedo);
+
+// Snap toggle
+const snapSwitch = document.getElementById('snap-switch');
+document.getElementById('snap-toggle').addEventListener('click', () => {
+  snapEnabled = !snapEnabled;
+  snapSwitch.classList.toggle('on', snapEnabled);
+  transformControls.setTranslationSnap(snapEnabled ? 0.5 : null);
+  transformControls.setRotationSnap(snapEnabled ? THREE.MathUtils.degToRad(15) : null);
+  transformControls.setScaleSnap(snapEnabled ? 0.25 : null);
+});
+
+// Snap the camera to look at the model from the front (looking down -Z, toward +Z marker)
+// Pressing F again toggles the front indicator (arrow + label + badge) off, then back on.
+let frontIndicatorVisible = true;
+function goToFrontView() {
+  const dist = camera.position.distanceTo(orbit.target) || 8;
+  const targetPos = new THREE.Vector3(orbit.target.x, orbit.target.y, orbit.target.z + dist);
+  camera.position.copy(targetPos);
+  camera.up.set(0, 1, 0);
+  orbit.update();
+
+  frontIndicatorVisible = !frontIndicatorVisible;
+  frontMarkerGroup.visible = frontIndicatorVisible;
+  frontLabelSprite.visible = frontIndicatorVisible;
+  const badge = document.getElementById('front-badge');
+  if (badge) badge.style.display = frontIndicatorVisible ? 'flex' : 'none';
+
+  showToast(frontIndicatorVisible ? 'Front view' : 'Front view (indicator hidden)');
+}
+
+// Keyboard shortcuts
+window.addEventListener('keydown', (e) => {
+  if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+  if (e.key === 'Tab') { e.preventDefault(); toggleEditMode(); return; }
+
+  if (e.key === 'f' || e.key === 'F') { e.preventDefault(); goToFrontView(); return; }
+
+  if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveProject(); return; }
+  if ((e.key === 'o' || e.key === 'O') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); document.getElementById('file-load-project').click(); return; }
+
+  if (editMode.active) {
+    if (e.key === '1') setEditSelMode('vertex');
+    if (e.key === '2') setEditSelMode('edge');
+    if (e.key === '3') setEditSelMode('face');
+    if ((e.key === 'e' || e.key === 'E') ) { e.preventDefault(); doExtrude(); }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteEditSelection(); }
+    if (e.key === 'Escape') { exitEditMode(); }
+    if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !e.shiftKey) { e.preventDefault(); doUndo(); }
+    return;
+  }
+
+  if (e.key === 'w' || e.key === 'W') setTool('translate');
+  if (e.key === 'e' || e.key === 'E') setTool('rotate');
+  if (e.key === 'r' || e.key === 'R') setTool('scale');
+  if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); }
+  if (e.key === 'a' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); setSelection([...objects]); }
+  if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !e.shiftKey) { e.preventDefault(); doUndo(); }
+  if (((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && e.shiftKey) || ((e.key === 'y' || e.key === 'Y') && (e.ctrlKey || e.metaKey))) { e.preventDefault(); doRedo(); }
+  if (e.key.toLowerCase() === 'd' && e.shiftKey) { e.preventDefault(); duplicateSelected(); }
+  if (e.key === 'Escape') { setSelection([]); }
+});
+function setTool(tool) {
+  document.querySelectorAll('.tool-btn[data-tool]').forEach(b => { if (b.dataset.tool !== 'local') b.classList.remove('active'); });
+  document.querySelector(`.tool-btn[data-tool="${tool}"]`).classList.add('active');
+  transformControls.setMode(tool);
+}
+
+// Click to select in viewport, drag on empty space = box select
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let downPos = null;
+let boxSelecting = false;
+let boxSelectEl = null;
+let boxStartClient = null;
+
+function screenToNDC(clientX, clientY) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  return {
+    x: ((clientX - rect.left) / rect.width) * 2 - 1,
+    y: -((clientY - rect.top) / rect.height) * 2 + 1
+  };
+}
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (editMode.active) return; // handled by editModePointerDown below
+  if (transformControls.dragging) return;
+  downPos = {x:e.clientX, y:e.clientY};
+  // Box-select only arms when Shift is held and the click starts on empty space.
+  // Plain left-drag is reserved for orbiting the camera (previously any empty-space
+  // drag was mistaken for a box-select, which hijacked orbit).
+  if (!e.shiftKey) { boxStartClient = null; return; }
+  const ndc = screenToNDC(e.clientX, e.clientY);
+  mouse.set(ndc.x, ndc.y);
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(objects.map(o=>o.mesh), false);
+  if (hits.length === 0) {
+    boxStartClient = {x:e.clientX, y:e.clientY};
+  }
+});
+
+window.addEventListener('pointermove', (e) => {
+  if (editMode.active) return;
+  if (!boxStartClient) return;
+  const dist = Math.hypot(e.clientX - boxStartClient.x, e.clientY - boxStartClient.y);
+  if (dist > 6 && !boxSelecting) {
+    boxSelecting = true;
+    orbit.enabled = false;
+    boxSelectEl = document.createElement('div');
+    boxSelectEl.style.cssText = 'position:fixed; border:1px solid var(--accent); background:rgba(255,138,61,0.12); pointer-events:none; z-index:50;';
+    document.body.appendChild(boxSelectEl);
+  }
+  if (boxSelecting) {
+    const x1 = Math.min(boxStartClient.x, e.clientX), x2 = Math.max(boxStartClient.x, e.clientX);
+    const y1 = Math.min(boxStartClient.y, e.clientY), y2 = Math.max(boxStartClient.y, e.clientY);
+    boxSelectEl.style.left = x1+'px'; boxSelectEl.style.top = y1+'px';
+    boxSelectEl.style.width = (x2-x1)+'px'; boxSelectEl.style.height = (y2-y1)+'px';
+  }
+});
+
+window.addEventListener('pointerup', (e) => {
+  if (editMode.active) return;
+  if (boxSelecting) {
+    const x1 = Math.min(boxStartClient.x, e.clientX), x2 = Math.max(boxStartClient.x, e.clientX);
+    const y1 = Math.min(boxStartClient.y, e.clientY), y2 = Math.max(boxStartClient.y, e.clientY);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const hitObjs = objects.filter(o => {
+      const v = o.mesh.position.clone().project(camera);
+      const sx = rect.left + (v.x*0.5+0.5)*rect.width;
+      const sy = rect.top + (-v.y*0.5+0.5)*rect.height;
+      return sx>=x1 && sx<=x2 && sy>=y1 && sy<=y2;
+    });
+    setSelection(hitObjs);
+    boxSelectEl.remove(); boxSelectEl = null;
+    boxSelecting = false;
+    orbit.enabled = true;
+  }
+  boxStartClient = null;
+});
+
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (editMode.active) return;
+  if (!downPos || boxSelecting) { downPos = null; return; }
+  const dist = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
+  downPos = null;
+  if (dist > 5) return; // was a drag/orbit
+  const ndc = screenToNDC(e.clientX, e.clientY);
+  mouse.set(ndc.x, ndc.y);
+  raycaster.setFromCamera(mouse, camera);
+  const meshes = objects.map(o => o.mesh);
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length > 0) {
+    const obj = objects.find(o => o.mesh === hits[0].object);
+    if (obj) selectObject(obj, e.shiftKey || e.ctrlKey || e.metaKey);
+  } else {
+    if (!transformControls.dragging) selectObject(null);
+  }
+});
+
+// ---------------- IMPORT ----------------
+document.getElementById('btn-import').addEventListener('click', () => document.getElementById('file-import').click());
+document.getElementById('file-import').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  const url = URL.createObjectURL(file);
+
+  const finishImport = (rootObject3D, baseName) => {
+    pushUndo();
+    const meshesFound = [];
+    rootObject3D.traverse((child) => {
+      if (child.isMesh) meshesFound.push(child);
+    });
+    if (meshesFound.length === 0) {
+      showToast('No mesh geometry found in file', true);
+      return;
+    }
+    const newObjs = meshesFound.map((child, i) => {
+      child.geometry.computeVertexNormals();
+      child.geometry.center();
+      const worldPos = new THREE.Vector3();
+      child.getWorldPosition(worldPos);
+      const worldScale = new THREE.Vector3();
+      child.getWorldScale(worldScale);
+      const worldQuat = new THREE.Quaternion();
+      child.getWorldQuaternion(worldQuat);
+      const worldRot = new THREE.Euler().setFromQuaternion(worldQuat);
+
+      let mat = child.material;
+      if (Array.isArray(mat)) mat = mat[0];
+      const color = (mat && mat.color) ? '#'+mat.color.getHexString() : colorPresets[objects.length % colorPresets.length];
+      const map = (mat && mat.map) ? mat.map : null;
+
+      const obj = addPrimitiveFromGeometry(child.geometry, {
+        name: meshesFound.length > 1 ? `${baseName}_${i+1}` : baseName,
+        position: worldPos,
+        rotation: worldRot,
+        scale: worldScale.length() > 0 ? worldScale : new THREE.Vector3(1,1,1),
+        color, map,
+        roughness: mat?.roughness ?? 0.55,
+        metalness: mat?.metalness ?? 0.08
+      }, true);
+      return obj;
+    });
+    setSelection(newObjs);
+    refreshOutliner(); refreshEmptyState();
+    showToast(`Imported ${newObjs.length} object${newObjs.length!==1?'s':''} from ${file.name}`);
+  };
+
+  if (ext === 'glb' || ext === 'gltf') {
+    new GLTFLoader().load(url, (gltf) => finishImport(gltf.scene, file.name.replace(/\.(glb|gltf)$/i,'')), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
+  } else if (ext === 'obj') {
+    new OBJLoader().load(url, (objRoot) => finishImport(objRoot, file.name.replace(/\.obj$/i,'')), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
+  } else {
+    showToast('Unsupported file type', true);
+  }
+  e.target.value = '';
+});
+
+function addPrimitiveFromGeometry(geometry, opts, skipSelect=false) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(opts.color || '#ffffff'),
+    roughness: opts.roughness ?? 0.55,
+    metalness: opts.metalness ?? 0.08,
+    map: opts.map || null,
+    side: THREE.FrontSide
+  });
+  const mesh = new THREE.Mesh(geometry, mat);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  if (opts.position) mesh.position.copy(opts.position);
+  if (opts.rotation) mesh.rotation.copy(opts.rotation);
+  if (opts.scale) mesh.scale.copy(opts.scale);
+  scene.add(mesh);
+  const id = idCounter++;
+  const obj = { id, mesh, name: opts.name || `Import.${String(id).padStart(3,'0')}`, type: 'imported' };
+  objects.push(obj);
+  if (!skipSelect) selectObject(obj);
+  return obj;
+}
+
+// ---------------- EXPORT ----------------
+const exportOverlay = document.getElementById('export-overlay');
+document.getElementById('btn-export').addEventListener('click', () => {
+  exportOverlay.classList.add('show');
+});
+document.getElementById('export-cancel').addEventListener('click', () => exportOverlay.classList.remove('show'));
+let exportFmt = 'glb';
+document.querySelectorAll('.format-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('.format-opt').forEach(o=>o.classList.remove('selected'));
+    opt.classList.add('selected');
+    exportFmt = opt.dataset.fmt;
+  });
+});
+document.getElementById('export-confirm').addEventListener('click', () => {
+  doExport(exportFmt);
+  exportOverlay.classList.remove('show');
+});
+
+function doExport(format) {
+  const exportScene = new THREE.Scene();
+  objects.forEach(o => {
+    const clone = o.mesh.clone();
+    clone.material = o.mesh.material.clone();
+    clone.material.emissive.set(0x000000);
+    clone.name = o.name;
+    exportScene.add(clone);
+  });
+  const exporter = new GLTFExporter();
+  const opts = { binary: format === 'glb' };
+  exporter.parse(exportScene, (result) => {
+    if (format === 'glb') {
+      const blob = new Blob([result], { type: 'application/octet-stream' });
+      downloadBlob(blob, 'model.glb');
+    } else {
+      const json = JSON.stringify(result, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      downloadBlob(blob, 'model.gltf');
+    }
+    showToast(`Exported model.${format}`);
+  }, (err) => {
+    console.error(err);
+    showToast('Export failed — check console', true);
+  }, opts);
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ---------------- SAVE / LOAD PROJECT ----------------
+function saveProject() {
+  const project = {
+    app: 'formwork-3d-modeler',
+    version: 1,
+    savedAt: new Date().toISOString(),
+    objects: snapshotScene()
+  };
+  const json = JSON.stringify(project, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  downloadBlob(blob, `formwork-project-${stamp}.json`);
+  showToast('Project saved');
+}
+
+function loadProjectFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let project;
+    try {
+      project = JSON.parse(reader.result);
+    } catch (err) {
+      console.error(err);
+      showToast('Load failed — not a valid project file', true);
+      return;
+    }
+    const snap = Array.isArray(project) ? project : project.objects;
+    if (!Array.isArray(snap)) {
+      showToast('Load failed — unrecognized project format', true);
+      return;
+    }
+    pushUndo();
+    restoreScene(snap);
+    showToast(`Loaded project (${snap.length} object${snap.length!==1?'s':''})`);
+  };
+  reader.onerror = () => showToast('Load failed — could not read file', true);
+  reader.readAsText(file);
+}
+
+document.getElementById('btn-save-project').addEventListener('click', saveProject);
+document.getElementById('btn-load-project').addEventListener('click', () => document.getElementById('file-load-project').click());
+document.getElementById('file-load-project').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) loadProjectFromFile(file);
+  e.target.value = '';
+});
+
+// Autosave to localStorage so a reload/crash can be recovered
+const AUTOSAVE_KEY = 'formwork3d-autosave';
+function autosaveToLocalStorage() {
+  try {
+    const project = { app: 'formwork-3d-modeler', version: 1, savedAt: new Date().toISOString(), objects: snapshotScene() };
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(project));
+  } catch (err) {
+    console.warn('Autosave failed', err);
+  }
+}
+setInterval(autosaveToLocalStorage, 20000);
+window.addEventListener('beforeunload', autosaveToLocalStorage);
+
+// Offer to restore an autosave on load, if present and current scene is empty
+window.addEventListener('load', () => {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (raw && objects.length === 0) {
+      const project = JSON.parse(raw);
+      if (project?.objects?.length) {
+        const when = project.savedAt ? new Date(project.savedAt).toLocaleString() : 'earlier';
+        if (confirm(`Restore your autosaved project from ${when}?`)) {
+          restoreScene(project.objects);
+          showToast('Autosave restored');
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Autosave restore failed', err);
+  }
+});
+
+function showToast(msg, isError=false) {
+  const t = document.getElementById('toast');
+  document.getElementById('toast-msg').textContent = msg;
+  t.classList.toggle('error', !!isError);
+  const icon = t.querySelector('svg');
+  icon.innerHTML = isError
+    ? '<path d="M18 6 6 18M6 6l12 12"/>'
+    : '<path d="M20 6 9 17l-5-5"/>';
+  t.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+// ==================================================================
+// ---------------- EDIT MODE (vertex/edge/face, extrude, loop cut) ----
+// ==================================================================
+
+const editMode = {
+  active: false,
+  obj: null,            // the object being edited
+  selMode: 'vertex',     // 'vertex' | 'edge' | 'face'
+  verts: [],             // [{pos: Vector3 (local), ids:[bufferIndex...]}] merged-by-position vertices
+  edges: [],             // [{a: vertIdx, b: vertIdx, faces:[faceIdx...]}]
+  faces: [],             // [{verts:[vertIdx,...], normal: Vector3, triIndices:[triStart,...]}]
+  selectedVerts: new Set(),
+  selectedEdges: new Set(),
+  selectedFaces: new Set(),
+  loopCutPreview: null,  // {edgeIdx, t}
+  loopCutArmed: false,
+};
+
+const editGroup = new THREE.Group();
+scene.add(editGroup);
+let vertPointsObj = null, edgeLinesObj = null, faceDotsObj = null, loopCutLineObj = null;
+
+const EDIT_VERT_COLOR = 0x5b9dd9, EDIT_VERT_SEL_COLOR = 0xff8a3d;
+const EDIT_EDGE_COLOR = 0xe0e2e8, EDIT_EDGE_SEL_COLOR = 0xff8a3d;
+const EDIT_FACE_COLOR = 0x5ec98f, EDIT_FACE_SEL_COLOR = 0xff8a3d;
+
+function posKey(v) { return `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`; }
+
+// Build a merged-vertex / edge / face topology from a non-indexed-or-indexed BufferGeometry.
+// This is a pragmatic (not fully general half-edge) mesh structure sufficient for select/extrude/loop-cut.
+function buildEditTopology(geometry) {
+  const geo = geometry.index ? geometry.toNonIndexed() : geometry;
+  const posAttr = geo.attributes.position;
+  const triCount = posAttr.count / 3;
+
+  const vertMap = new Map(); // posKey -> vert index
+  const verts = [];          // {pos, bufferIndices:[]}
+  const faces = [];          // {vertIdx:[a,b,c], triStart}
+  const edgeMap = new Map(); // "minV-maxV" -> edge index
+  const edges = [];          // {a,b,faces:[]}
+
+  function getOrAddVert(x, y, z, bufferIndex) {
+    const v = new THREE.Vector3(x, y, z);
+    const key = posKey(v);
+    let idx = vertMap.get(key);
+    if (idx === undefined) {
+      idx = verts.length;
+      verts.push({ pos: v, bufferIndices: [] });
+      vertMap.set(key, idx);
+    }
+    verts[idx].bufferIndices.push(bufferIndex);
+    return idx;
+  }
+
+  function getOrAddEdge(a, b, faceIdx) {
+    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+    let idx = edgeMap.get(key);
+    if (idx === undefined) {
+      idx = edges.length;
+      edges.push({ a: Math.min(a,b), b: Math.max(a,b), faces: [] });
+      edgeMap.set(key, idx);
+    }
+    edges[idx].faces.push(faceIdx);
+    return idx;
+  }
+
+  for (let t = 0; t < triCount; t++) {
+    const i0 = t*3, i1 = t*3+1, i2 = t*3+2;
+    const v0 = getOrAddVert(posAttr.getX(i0), posAttr.getY(i0), posAttr.getZ(i0), i0);
+    const v1 = getOrAddVert(posAttr.getX(i1), posAttr.getY(i1), posAttr.getZ(i1), i1);
+    const v2 = getOrAddVert(posAttr.getX(i2), posAttr.getY(i2), posAttr.getZ(i2), i2);
+    const faceIdx = faces.length;
+    faces.push({ vertIdx: [v0, v1, v2], triStart: t*3 });
+    getOrAddEdge(v0, v1, faceIdx);
+    getOrAddEdge(v1, v2, faceIdx);
+    getOrAddEdge(v2, v0, faceIdx);
+  }
+
+  return { geo, verts, edges, faces };
+}
+
+function enterEditMode() {
+  if (!selected || selectedSet.size !== 1) { showToast('Select a single object to edit', true); return; }
+  pushUndo();
+  editMode.active = true;
+  editMode.obj = selected;
+  editMode.selectedVerts.clear();
+  editMode.selectedEdges.clear();
+  editMode.selectedFaces.clear();
+  editMode.loopCutArmed = false;
+
+  // Ensure geometry is non-indexed so buffer positions map 1:1 to triangle corners (simplifies edits)
+  const mesh = editMode.obj.mesh;
+  if (mesh.geometry.index) {
+    const nonIndexed = mesh.geometry.toNonIndexed();
+    mesh.geometry.dispose();
+    mesh.geometry = nonIndexed;
+  }
+
+  transformControls.detach();
+  orbit.enabled = true;
+
+  document.getElementById('btn-edit-mode').classList.add('active');
+  document.getElementById('edit-sub-toolbar').style.display = 'flex';
+  document.getElementById('edit-mode-badge').classList.add('show');
+  document.getElementById('viewport-hint-object').style.display = 'none';
+  document.getElementById('viewport-hint-edit').style.display = 'flex';
+  document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.style.pointerEvents = 'none');
+
+  rebuildEditTopology();
+  setEditSelMode('vertex');
+  refreshInspector();
+}
+
+function exitEditMode() {
+  if (!editMode.active) return;
+  editMode.active = false;
+  clearEditOverlays();
+  document.getElementById('btn-edit-mode').classList.remove('active');
+  document.getElementById('edit-sub-toolbar').style.display = 'none';
+  document.getElementById('edit-mode-badge').classList.remove('show');
+  document.getElementById('viewport-hint-object').style.display = 'flex';
+  document.getElementById('viewport-hint-edit').style.display = 'none';
+  document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.style.pointerEvents = '');
+  if (editMode.obj) {
+    editMode.obj.mesh.geometry.computeVertexNormals();
+    editMode.obj.mesh.geometry.attributes.position.needsUpdate = true;
+    editMode.obj.mesh.geometry.computeBoundingSphere();
+    editMode.obj.mesh.geometry.computeBoundingBox();
+  }
+  attachGizmoToSelection();
+  refreshInspector();
+  updateStats();
+}
+
+function toggleEditMode() {
+  if (editMode.active) exitEditMode(); else enterEditMode();
+}
+
+document.getElementById('btn-edit-mode').addEventListener('click', toggleEditMode);
+
+function rebuildEditTopology() {
+  const mesh = editMode.obj.mesh;
+  const topo = buildEditTopology(mesh.geometry);
+  editMode.verts = topo.verts;
+  editMode.edges = topo.edges;
+  editMode.faces = topo.faces;
+  editMode.selectedVerts.clear();
+  editMode.selectedEdges.clear();
+  editMode.selectedFaces.clear();
+  rebuildEditOverlays();
+}
+
+function clearEditOverlays() {
+  [vertPointsObj, edgeLinesObj, faceDotsObj, loopCutLineObj].forEach(o => {
+    if (o) { editGroup.remove(o); o.geometry.dispose(); o.material.dispose(); }
+  });
+  vertPointsObj = edgeLinesObj = faceDotsObj = loopCutLineObj = null;
+}
+
+function faceCenterLocal(face) {
+  const c = new THREE.Vector3();
+  face.vertIdx.forEach(vi => c.add(editMode.verts[vi].pos));
+  c.divideScalar(face.vertIdx.length);
+  return c;
+}
+
+function faceNormalLocal(face) {
+  const [a,b,c] = face.vertIdx.map(vi => editMode.verts[vi].pos);
+  const ab = b.clone().sub(a), ac = c.clone().sub(a);
+  return ab.cross(ac).normalize();
+}
+
+function rebuildEditOverlays() {
+  clearEditOverlays();
+  const mesh = editMode.obj.mesh;
+
+  // Vertices
+  const vPositions = new Float32Array(editMode.verts.length * 3);
+  const vColors = new Float32Array(editMode.verts.length * 3);
+  editMode.verts.forEach((v, i) => {
+    vPositions[i*3] = v.pos.x; vPositions[i*3+1] = v.pos.y; vPositions[i*3+2] = v.pos.z;
+    const c = new THREE.Color(editMode.selectedVerts.has(i) ? EDIT_VERT_SEL_COLOR : EDIT_VERT_COLOR);
+    vColors[i*3] = c.r; vColors[i*3+1] = c.g; vColors[i*3+2] = c.b;
+  });
+  const vGeo = new THREE.BufferGeometry();
+  vGeo.setAttribute('position', new THREE.BufferAttribute(vPositions, 3));
+  vGeo.setAttribute('color', new THREE.BufferAttribute(vColors, 3));
+  const vMat = new THREE.PointsMaterial({ size: 0.09, vertexColors: true, sizeAttenuation: true, depthTest: false, transparent: true });
+  vertPointsObj = new THREE.Points(vGeo, vMat);
+  vertPointsObj.renderOrder = 999;
+  editGroup.add(vertPointsObj);
+
+  // Edges
+  const ePositions = new Float32Array(editMode.edges.length * 6);
+  const eColors = new Float32Array(editMode.edges.length * 6);
+  editMode.edges.forEach((e, i) => {
+    const a = editMode.verts[e.a].pos, b = editMode.verts[e.b].pos;
+    ePositions[i*6] = a.x; ePositions[i*6+1] = a.y; ePositions[i*6+2] = a.z;
+    ePositions[i*6+3] = b.x; ePositions[i*6+4] = b.y; ePositions[i*6+5] = b.z;
+    const c = new THREE.Color(editMode.selectedEdges.has(i) ? EDIT_EDGE_SEL_COLOR : EDIT_EDGE_COLOR);
+    for (let k=0;k<2;k++){ eColors[i*6+k*3]=c.r; eColors[i*6+k*3+1]=c.g; eColors[i*6+k*3+2]=c.b; }
+  });
+  const eGeo = new THREE.BufferGeometry();
+  eGeo.setAttribute('position', new THREE.BufferAttribute(ePositions, 3));
+  eGeo.setAttribute('color', new THREE.BufferAttribute(eColors, 3));
+  const eMat = new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true, opacity: 0.95, linewidth: 1 });
+  edgeLinesObj = new THREE.LineSegments(eGeo, eMat);
+  edgeLinesObj.renderOrder = 998;
+  editGroup.add(edgeLinesObj);
+
+  // Face dots (centers)
+  const fPositions = new Float32Array(editMode.faces.length * 3);
+  const fColors = new Float32Array(editMode.faces.length * 3);
+  editMode.faces.forEach((f, i) => {
+    const c = faceCenterLocal(f);
+    fPositions[i*3]=c.x; fPositions[i*3+1]=c.y; fPositions[i*3+2]=c.z;
+    const col = new THREE.Color(editMode.selectedFaces.has(i) ? EDIT_FACE_SEL_COLOR : EDIT_FACE_COLOR);
+    fColors[i*3]=col.r; fColors[i*3+1]=col.g; fColors[i*3+2]=col.b;
+  });
+  const fGeo = new THREE.BufferGeometry();
+  fGeo.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
+  fGeo.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
+  const fMat = new THREE.PointsMaterial({ size: 0.07, vertexColors: true, sizeAttenuation: true, depthTest: false, transparent: true, opacity: 0.9 });
+  faceDotsObj = new THREE.Points(fGeo, fMat);
+  faceDotsObj.renderOrder = 997;
+  editGroup.add(faceDotsObj);
+
+  editGroup.position.copy(mesh.position);
+  editGroup.rotation.copy(mesh.rotation);
+  editGroup.scale.copy(mesh.scale);
+
+  updateOverlayVisibility();
+}
+
+function updateOverlayVisibility() {
+  if (!vertPointsObj) return;
+  vertPointsObj.visible = editMode.selMode === 'vertex';
+  faceDotsObj.visible = editMode.selMode === 'face';
+  edgeLinesObj.visible = true; // edges always shown as wireframe reference
+  edgeLinesObj.material.opacity = editMode.selMode === 'edge' ? 0.95 : 0.35;
+}
+
+function setEditSelMode(mode) {
+  editMode.selMode = mode;
+  document.querySelectorAll('#edit-sub-toolbar .tool-btn[data-selmode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.selmode === mode);
+  });
+  document.getElementById('edit-mode-badge-text').textContent = `EDIT MODE — ${mode[0].toUpperCase()+mode.slice(1)}`;
+  updateOverlayVisibility();
+}
+document.querySelectorAll('#edit-sub-toolbar .tool-btn[data-selmode]').forEach(btn => {
+  btn.addEventListener('click', () => setEditSelMode(btn.dataset.selmode));
+});
+
+// -------- Write current (possibly-edited) vertex positions back into the mesh's BufferGeometry --------
+function commitVertsToGeometry() {
+  const posAttr = editMode.obj.mesh.geometry.attributes.position;
+  editMode.verts.forEach(v => {
+    v.bufferIndices.forEach(bi => {
+      posAttr.setXYZ(bi, v.pos.x, v.pos.y, v.pos.z);
+    });
+  });
+  posAttr.needsUpdate = true;
+  editMode.obj.mesh.geometry.computeVertexNormals();
+  editMode.obj.mesh.geometry.computeBoundingSphere();
+}
+
+// -------- Picking --------
+function editModePointerDown(e) {
+  if (transformControls.dragging) return;
+  editDownPos = { x: e.clientX, y: e.clientY };
+}
+
+function pickInEditMode(clientX, clientY, additive) {
+  const mesh = editMode.obj.mesh;
+  const ndc = screenToNDC(clientX, clientY);
+  mouse.set(ndc.x, ndc.y);
+  raycaster.setFromCamera(mouse, camera);
+  raycaster.params.Points.threshold = 0.08;
+  raycaster.params.Line.threshold = 0.06;
+
+  if (editMode.selMode === 'vertex') {
+    const hits = raycaster.intersectObject(vertPointsObj, false);
+    if (hits.length === 0) { if (!additive) clearEditSelection(); rebuildEditOverlays(); return; }
+    const idx = hits[0].index;
+    toggleInSet(editMode.selectedVerts, idx, additive);
+  } else if (editMode.selMode === 'edge') {
+    const hits = raycaster.intersectObject(edgeLinesObj, false);
+    if (hits.length === 0) { if (!additive) clearEditSelection(); rebuildEditOverlays(); return; }
+    const idx = Math.floor(hits[0].index / 2);
+    toggleInSet(editMode.selectedEdges, idx, additive);
+  } else if (editMode.selMode === 'face') {
+    // raycast against actual mesh surface, map hit triangle -> our face record
+    const hits = raycaster.intersectObject(mesh, false);
+    if (hits.length === 0) { if (!additive) clearEditSelection(); rebuildEditOverlays(); return; }
+    const triIdx = hits[0].faceIndex; // triangle index into non-indexed geometry
+    const faceIdx = editMode.faces.findIndex(f => f.triStart/3 === triIdx);
+    if (faceIdx >= 0) toggleInSet(editMode.selectedFaces, faceIdx, additive);
+  }
+  rebuildEditOverlays();
+  refreshEditInspectorHint();
+}
+
+function toggleInSet(set, idx, additive) {
+  if (!additive) set.clear();
+  if (set.has(idx)) set.delete(idx); else set.add(idx);
+}
+
+function clearEditSelection() {
+  editMode.selectedVerts.clear();
+  editMode.selectedEdges.clear();
+  editMode.selectedFaces.clear();
+}
+
+let editDownPos = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { if (editMode.active) editModePointerDown(e); });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!editMode.active) return;
+  if (!editDownPos) return;
+  const dist = Math.hypot(e.clientX - editDownPos.x, e.clientY - editDownPos.y);
+  editDownPos = null;
+  if (dist > 5) return; // was an orbit drag
+
+  if (editMode.loopCutArmed) {
+    confirmLoopCut(e.clientX, e.clientY);
+    return;
+  }
+  pickInEditMode(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || e.metaKey);
+});
+
+// -------- Extrude --------
+// Extrudes selected face(s) or edge(s) outward along their (averaged) normal by a fixed default step,
+// creating new geometry, then attaches the translate gizmo (proxy) to the new verts so the user can drag.
+function doExtrude() {
+  if (!editMode.active) return;
+  if (editMode.selMode === 'face' && editMode.selectedFaces.size > 0) {
+    extrudeFaces([...editMode.selectedFaces]);
+  } else if (editMode.selMode === 'edge' && editMode.selectedEdges.size > 0) {
+    extrudeEdges([...editMode.selectedEdges]);
+  } else if (editMode.selMode === 'vertex' && editMode.selectedVerts.size > 0) {
+    extrudeVertsAsPoints([...editMode.selectedVerts]);
+  } else {
+    showToast('Select vertices, an edge or a face to extrude', true);
+    return;
+  }
+}
+
+function appendTriangle(posArr, a, b, c) {
+  posArr.push(a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z);
+}
+
+function extrudeFaces(faceIdxs) {
+  const mesh = editMode.obj.mesh;
+  const geo = mesh.geometry;
+  const oldPos = geo.attributes.position;
+  const newTris = []; // flat array of vec3 triples appended fresh for the new "wall" triangles
+
+  const EXTRUDE_DIST = 0.5;
+  const newVertOffsetMap = new Map(); // vertIdx (topology) -> new Vector3 position
+
+  faceIdxs.forEach(fi => {
+    const face = editMode.faces[fi];
+    const n = faceNormalLocal(face);
+    face.vertIdx.forEach(vi => {
+      if (!newVertOffsetMap.has(vi)) {
+        newVertOffsetMap.set(vi, editMode.verts[vi].pos.clone().add(n.clone().multiplyScalar(EXTRUDE_DIST)));
+      }
+    });
+  });
+
+  // Build set of boundary edges (edges used by exactly one selected face, or shared between two selected faces -> not boundary)
+  const faceSet = new Set(faceIdxs);
+  const boundaryEdges = [];
+  editMode.edges.forEach((e, ei) => {
+    const usedBySelected = e.faces.filter(f => faceSet.has(f));
+    if (usedBySelected.length === 1) boundaryEdges.push(e);
+  });
+
+  const outPositions = Array.from(oldPos.array); // keep original triangles as-is (base mesh stays)
+
+  // Move the selected faces' triangles to the new offset position (cap)
+  faceIdxs.forEach(fi => {
+    const face = editMode.faces[fi];
+    face.vertIdx.forEach((vi, corner) => {
+      const p = newVertOffsetMap.get(vi);
+      const base = (face.triStart + corner) * 3; // triStart is a vertex-index (t*3); convert to component offset
+      outPositions[base] = p.x; outPositions[base+1] = p.y; outPositions[base+2] = p.z;
+    });
+  });
+
+  // Build wall quads (as 2 tris each) along boundary edges, connecting old edge to new offset edge
+  boundaryEdges.forEach(e => {
+    const a0 = editMode.verts[e.a].pos;
+    const b0 = editMode.verts[e.b].pos;
+    const a1 = newVertOffsetMap.get(e.a) || a0;
+    const b1 = newVertOffsetMap.get(e.b) || b0;
+    // two triangles forming the wall quad a0,b0,b1,a1 — winding chosen to face outward-ish
+    appendTriangle(newTris, a0, b0, b1);
+    appendTriangle(newTris, a0, b1, a1);
+  });
+
+  const merged = new Float32Array(outPositions.length + newTris.length);
+  merged.set(outPositions, 0);
+  merged.set(newTris, outPositions.length);
+
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.BufferAttribute(merged, 3));
+  newGeo.computeVertexNormals();
+  geo.dispose();
+  mesh.geometry = newGeo;
+
+  pushUndo();
+  finishTopologyEdit();
+  // re-select the (now extruded) faces so user can immediately grab-move them further via gizmo drag
+  showToast(`Extruded ${faceIdxs.length} face${faceIdxs.length!==1?'s':''}`);
+}
+
+function extrudeEdges(edgeIdxs) {
+  const mesh = editMode.obj.mesh;
+  const geo = mesh.geometry;
+  const oldPos = geo.attributes.position;
+  const EXTRUDE_DIST = 0.5;
+
+  // Average normal from adjacent faces of these edges
+  const n = new THREE.Vector3();
+  edgeIdxs.forEach(ei => {
+    editMode.edges[ei].faces.forEach(fi => n.add(faceNormalLocal(editMode.faces[fi])));
+  });
+  if (n.lengthSq() < 1e-6) n.set(0,1,0); else n.normalize();
+
+  const newTris = [];
+  edgeIdxs.forEach(ei => {
+    const e = editMode.edges[ei];
+    const a0 = editMode.verts[e.a].pos;
+    const b0 = editMode.verts[e.b].pos;
+    const a1 = a0.clone().add(n.clone().multiplyScalar(EXTRUDE_DIST));
+    const b1 = b0.clone().add(n.clone().multiplyScalar(EXTRUDE_DIST));
+    appendTriangle(newTris, a0, b0, b1);
+    appendTriangle(newTris, a0, b1, a1);
+  });
+
+  const merged = new Float32Array(oldPos.array.length + newTris.length);
+  merged.set(oldPos.array, 0);
+  merged.set(newTris, oldPos.array.length);
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.BufferAttribute(merged, 3));
+  newGeo.computeVertexNormals();
+  geo.dispose();
+  mesh.geometry = newGeo;
+
+  pushUndo();
+  finishTopologyEdit();
+  showToast(`Extruded ${edgeIdxs.length} edge${edgeIdxs.length!==1?'s':''}`);
+}
+
+function extrudeVertsAsPoints(vertIdxs) {
+  // Simple vertex "extrude": nudges selected verts along their averaged face-normal by a small step.
+  // (True vertex extrude that spawns new topology is ambiguous for arbitrary vert sets, so we move-in-place.)
+  const EXTRUDE_DIST = 0.35;
+  vertIdxs.forEach(vi => {
+    const adjFaces = editMode.faces.filter(f => f.vertIdx.includes(vi));
+    const n = new THREE.Vector3();
+    adjFaces.forEach(f => n.add(faceNormalLocal(f)));
+    if (n.lengthSq() < 1e-6) n.set(0,1,0); else n.normalize();
+    editMode.verts[vi].pos.add(n.multiplyScalar(EXTRUDE_DIST));
+  });
+  pushUndo();
+  commitVertsToGeometry();
+  rebuildEditTopology();
+  showToast(`Moved ${vertIdxs.length} vertex${vertIdxs.length!==1?'es':''} along normal`);
+}
+
+function finishTopologyEdit() {
+  rebuildEditTopology();
+  refreshOutliner();
+  updateStats();
+}
+
+document.getElementById('btn-extrude').addEventListener('click', doExtrude);
+
+// -------- Delete selected verts/edges/faces (removes any triangle touching them) --------
+function deleteEditSelection() {
+  const mesh = editMode.obj.mesh;
+  const geo = mesh.geometry;
+  const posAttr = geo.attributes.position;
+  const triCount = posAttr.count / 3;
+
+  let doomedTris = new Set();
+
+  if (editMode.selMode === 'face' && editMode.selectedFaces.size > 0) {
+    editMode.selectedFaces.forEach(fi => doomedTris.add(editMode.faces[fi].triStart/3));
+  } else if (editMode.selMode === 'edge' && editMode.selectedEdges.size > 0) {
+    editMode.selectedEdges.forEach(ei => {
+      editMode.edges[ei].faces.forEach(fi => doomedTris.add(editMode.faces[fi].triStart/3));
+    });
+  } else if (editMode.selMode === 'vertex' && editMode.selectedVerts.size > 0) {
+    editMode.faces.forEach((f, fi) => {
+      if (f.vertIdx.some(vi => editMode.selectedVerts.has(vi))) doomedTris.add(f.triStart/3);
+    });
+  } else {
+    return;
+  }
+
+  if (doomedTris.size === 0) return;
+  if (doomedTris.size === triCount) { showToast("Can't delete the entire mesh", true); return; }
+
+  const keep = [];
+  for (let t = 0; t < triCount; t++) {
+    if (doomedTris.has(t)) continue;
+    for (let c = 0; c < 3; c++) {
+      const i = t*3 + c;
+      keep.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+    }
+  }
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(keep), 3));
+  newGeo.computeVertexNormals();
+  geo.dispose();
+  mesh.geometry = newGeo;
+
+  pushUndo();
+  finishTopologyEdit();
+  showToast(`Deleted ${doomedTris.size} face${doomedTris.size!==1?'s':''}`);
+}
+
+// -------- Loop cut (basic) --------
+// User clicks an edge to arm the loop cut, then clicks again to confirm inserting a cut at the
+// midpoint of every parallel edge in that ring (approximated via matching edge direction).
+function armLoopCut() {
+  if (!editMode.active) { showToast('Enter Edit Mode first', true); return; }
+  editMode.loopCutArmed = true;
+  showToast('Click an edge to preview the loop cut, click again to confirm');
+}
+document.getElementById('btn-loopcut').addEventListener('click', armLoopCut);
+
+function confirmLoopCut(clientX, clientY) {
+  editMode.loopCutArmed = false;
+  const ndc = screenToNDC(clientX, clientY);
+  mouse.set(ndc.x, ndc.y);
+  raycaster.setFromCamera(mouse, camera);
+  raycaster.params.Line.threshold = 0.06;
+  const hits = raycaster.intersectObject(edgeLinesObj, false);
+  if (hits.length === 0) { showToast('No edge picked — loop cut cancelled', true); return; }
+  const seedIdx = Math.floor(hits[0].index / 2);
+  performLoopCut(seedIdx);
+}
+
+// Finds edges "parallel" (same direction, within tolerance) to the seed edge and splits each of them
+// at the midpoint, then splits the two triangles on either side of each cut edge into two triangles each.
+// This is a simplified loop cut: it does not walk a topological quad ring, but produces a usable
+// subdivision for typical box/cylinder-like formwork geometry.
+function performLoopCut(seedEdgeIdx) {
+  const mesh = editMode.obj.mesh;
+  const geo = mesh.geometry;
+  const posAttr = geo.attributes.position;
+  const triCount = posAttr.count / 3;
+
+  const seed = editMode.edges[seedEdgeIdx];
+  const seedDir = editMode.verts[seed.b].pos.clone().sub(editMode.verts[seed.a].pos).normalize();
+
+  // Find all edges parallel to the seed edge (dot ~ ±1)
+  const targetEdges = editMode.edges.filter(e => {
+    const dir = editMode.verts[e.b].pos.clone().sub(editMode.verts[e.a].pos).normalize();
+    return Math.abs(dir.dot(seedDir)) > 0.98;
+  });
+
+  if (targetEdges.length === 0) { showToast('Loop cut failed — no parallel edges found', true); return; }
+
+  // Midpoint lookup by rounded key for the split vertex on a given edge
+  const midKey = (e) => {
+    const a = editMode.verts[e.a].pos, b = editMode.verts[e.b].pos;
+    const m = a.clone().add(b).multiplyScalar(0.5);
+    return posKey(m);
+  };
+  const targetEdgeKeySet = new Set(targetEdges.map(e => {
+    const a = editMode.verts[e.a].pos, b = editMode.verts[e.b].pos;
+    return a.x<b.x-1e-6 || (Math.abs(a.x-b.x)<1e-6 && a.y<b.y-1e-6) || (Math.abs(a.x-b.x)<1e-6 && Math.abs(a.y-b.y)<1e-6 && a.z<b.z-1e-6)
+      ? `${posKey(a)}|${posKey(b)}` : `${posKey(b)}|${posKey(a)}`;
+  }));
+
+  function edgeIsTarget(p0, p1) {
+    const k = p0.x<p1.x-1e-6 || (Math.abs(p0.x-p1.x)<1e-6 && p0.y<p1.y-1e-6) || (Math.abs(p0.x-p1.x)<1e-6 && Math.abs(p0.y-p1.y)<1e-6 && p0.z<p1.z-1e-6)
+      ? `${posKey(p0)}|${posKey(p1)}` : `${posKey(p1)}|${posKey(p0)}`;
+    return targetEdgeKeySet.has(k);
+  }
+  function mid(p0, p1) { return p0.clone().add(p1).multiplyScalar(0.5); }
+
+  const outTris = []; // array of Vector3 triples
+  let cutCount = 0;
+
+  for (let t = 0; t < triCount; t++) {
+    const i0 = t*3, i1 = t*3+1, i2 = t*3+2;
+    const p0 = new THREE.Vector3(posAttr.getX(i0), posAttr.getY(i0), posAttr.getZ(i0));
+    const p1 = new THREE.Vector3(posAttr.getX(i1), posAttr.getY(i1), posAttr.getZ(i1));
+    const p2 = new THREE.Vector3(posAttr.getX(i2), posAttr.getY(i2), posAttr.getZ(i2));
+
+    const cut01 = edgeIsTarget(p0, p1);
+    const cut12 = edgeIsTarget(p1, p2);
+    const cut20 = edgeIsTarget(p2, p0);
+    const numCuts = (cut01?1:0) + (cut12?1:0) + (cut20?1:0);
+
+    if (numCuts === 0) {
+      outTris.push(p0, p1, p2);
+      continue;
+    }
+    cutCount++;
+
+    // Only handle the common case: exactly one edge of this triangle is on the loop-cut ring
+    // (typical for the wall triangles of an extruded/box-like mesh). Split it into two triangles
+    // through the midpoint and the opposite vertex.
+    if (numCuts === 1) {
+      if (cut01) {
+        const m = mid(p0, p1);
+        outTris.push(p0, m, p2);
+        outTris.push(m, p1, p2);
+      } else if (cut12) {
+        const m = mid(p1, p2);
+        outTris.push(p0, p1, m);
+        outTris.push(p0, m, p2);
+      } else {
+        const m = mid(p2, p0);
+        outTris.push(p0, p1, m);
+        outTris.push(m, p1, p2);
+      }
+    } else {
+      // Multiple cut edges on one triangle: fall back to a fan through midpoints (keeps mesh watertight-ish)
+      const pts = [p0,p1,p2];
+      const cuts = [cut01, cut12, cut20];
+      const edgesArr = [[p0,p1],[p1,p2],[p2,p0]];
+      const newPts = [];
+      for (let k=0;k<3;k++){
+        newPts.push(edgesArr[k][0]);
+        if (cuts[k]) newPts.push(mid(edgesArr[k][0], edgesArr[k][1]));
+      }
+      for (let k=1;k<newPts.length-1;k++){
+        outTris.push(newPts[0], newPts[k], newPts[k+1]);
+      }
+    }
+  }
+
+  if (cutCount === 0) { showToast('Loop cut failed — ring not found', true); return; }
+
+  const flat = new Float32Array(outTris.length * 3);
+  outTris.forEach((p, i) => { flat[i*3]=p.x; flat[i*3+1]=p.y; flat[i*3+2]=p.z; });
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
+  newGeo.computeVertexNormals();
+  geo.dispose();
+  mesh.geometry = newGeo;
+
+  pushUndo();
+  finishTopologyEdit();
+  showToast(`Loop cut inserted (${cutCount} triangles split)`);
+}
+
+// -------- Dragging selected verts/edges/faces with the transform gizmo while in edit mode --------
+// A lightweight proxy: attach TransformControls to an invisible pivot at the centroid of the
+// selection; on drag, translate the underlying vertex positions by the pivot's delta.
+const editPivot = new THREE.Object3D();
+scene.add(editPivot);
+let editPivotLastPos = new THREE.Vector3();
+let editDraggingVertRefs = [];
+
+function selectionCentroidLocal() {
+  const set = editMode.selMode === 'vertex' ? editMode.selectedVerts
+    : editMode.selMode === 'edge' ? new Set([...editMode.selectedEdges].flatMap(ei => [editMode.edges[ei].a, editMode.edges[ei].b]))
+    : new Set([...editMode.selectedFaces].flatMap(fi => editMode.faces[fi].vertIdx));
+  if (set.size === 0) return null;
+  const c = new THREE.Vector3();
+  set.forEach(vi => c.add(editMode.verts[vi].pos));
+  c.divideScalar(set.size);
+  return { center: c, vertIdxs: [...set] };
+}
+
+function attachGizmoToEditSelection() {
+  const sel = selectionCentroidLocal();
+  if (!sel) { transformControls.detach(); return; }
+  const mesh = editMode.obj.mesh;
+  editPivot.position.copy(sel.center).applyMatrix4(mesh.matrixWorld);
+  editPivot.quaternion.copy(mesh.quaternion);
+  editPivot.scale.set(1,1,1);
+  editPivotLastPos.copy(editPivot.position);
+  editDraggingVertRefs = sel.vertIdxs;
+  transformControls.setMode('translate');
+  transformControls.attach(editPivot);
+}
+
+transformControls.addEventListener('objectChange', () => {
+  if (!editMode.active) return;
+  if (transformControls.object !== editPivot) return;
+  const mesh = editMode.obj.mesh;
+  const worldDelta = editPivot.position.clone().sub(editPivotLastPos);
+  // apply rotation inverse for correctness when mesh is rotated
+  const invQuat = mesh.quaternion.clone().invert();
+  const rotatedDelta = worldDelta.clone().applyQuaternion(invQuat);
+  const scaledDelta = new THREE.Vector3(rotatedDelta.x/mesh.scale.x, rotatedDelta.y/mesh.scale.y, rotatedDelta.z/mesh.scale.z);
+  editDraggingVertRefs.forEach(vi => { editMode.verts[vi].pos.add(scaledDelta); });
+  editPivotLastPos.copy(editPivot.position);
+  commitVertsToGeometry();
+  rebuildEditOverlays();
+});
+
+// Re-attach gizmo to selection centroid whenever the edit selection changes
+const _origRebuildEditOverlays = rebuildEditOverlays;
+rebuildEditOverlays = function() {
+  _origRebuildEditOverlays();
+  if (editMode.active) attachGizmoToEditSelection();
+};
+
+function refreshEditInspectorHint() { /* placeholder for future per-selection inspector info */ }
+
+// ---------------- RESIZE / LOOP ----------------
+function onResize() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', onResize);
+
+function animate() {
+  requestAnimationFrame(animate);
+  orbit.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// Initial object so canvas isn't empty
+addPrimitive('box');
+refreshEmptyState();
+</script>
+</body>
+</html>
