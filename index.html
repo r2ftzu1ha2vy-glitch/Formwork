@@ -924,7 +924,7 @@ function cloneMeshDataFor(obj) {
   return {
     type: obj.type,
     name: obj.name,
-    geomJSON: obj.mesh.geometry.toJSON(),
+    geometry: obj.mesh.geometry.clone(),
     color: '#' + obj.mesh.material.color.getHexString(),
     rough: obj.mesh.material.roughness,
     metal: obj.mesh.material.metalness,
@@ -937,8 +937,12 @@ function cloneMeshDataFor(obj) {
 }
 
 function createObjectFromClone(data, posOverride) {
-  const geoLoader = new THREE.BufferGeometryLoader();
-  const geo = geoLoader.parse(data.geomJSON);
+  const geo = data.geometry ? data.geometry.clone() : new THREE.BufferGeometry();
+  if (!geo.attributes.position || geo.attributes.position.count === 0) {
+    console.warn('Duplicated geometry had no position data — falling back to a unit box so the copy stays visible');
+    geo.dispose();
+    return createObjectFromClone({ ...data, geometry: new THREE.BoxGeometry(1,1,1) }, posOverride);
+  }
   const dupOpac = data.opacity ?? 1;
   const mat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(data.color),
