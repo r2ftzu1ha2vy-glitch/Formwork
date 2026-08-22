@@ -752,7 +752,21 @@ orbit.update();
 const transformControls = new TransformControls(camera, renderer.domElement);
 transformControls.setSpace('world');
 scene.add(transformControls.getHelper ? transformControls.getHelper() : transformControls);
-transformControls.addEventListener('dragging-changed', (e) => { orbit.enabled = !e.value; });
+transformControls.addEventListener('dragging-changed', (e) => {
+  orbit.enabled = !e.value;
+  if (e.value) {
+    // Drag just started: snapshot the scene NOW so undo reverts this one move/rotate/scale,
+    // instead of skipping past it to whatever the last tracked action was.
+    pushUndo();
+    if (transformControls.mode === 'scale' && transformControls.object && transformControls.object !== multiProxy && typeof editPivot !== 'undefined' && transformControls.object !== editPivot) {
+      resizeSnapPrevBox = new THREE.Box3().setFromObject(transformControls.object);
+    } else {
+      resizeSnapPrevBox = null;
+    }
+  } else {
+    resizeSnapPrevBox = null;
+  }
+});
 
 
 // ---------------- STATE ----------------
@@ -779,6 +793,7 @@ function snapshotScene() {
     color: '#' + o.mesh.material.color.getHexString(),
     rough: o.mesh.material.roughness,
     metal: o.mesh.material.metalness,
+    opacity: o.mesh.material.opacity,
     mapImg: o.mesh.material.map ? o.mesh.material.map.image?.src : null
   }));
 }
@@ -803,7 +818,8 @@ function restoreScene(snap) {
   const geoLoader = new THREE.BufferGeometryLoader();
   snap.forEach(s => {
     const geo = geoLoader.parse(s.geomJSON);
-    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(s.color), roughness: s.rough, metalness: s.metal, side: s.type==='plane' ? THREE.DoubleSide : THREE.FrontSide });
+    const opac = s.opacity ?? 1;
+    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(s.color), roughness: s.rough, metalness: s.metal, opacity: opac, transparent: opac < 0.99, depthWrite: opac >= 0.99, side: s.type==='plane' ? THREE.DoubleSide : THREE.FrontSide });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true; mesh.receiveShadow = true;
     mesh.position.fromArray(s.pos);
@@ -901,16 +917,60 @@ function deleteSelected() {
   refreshOutliner(); refreshInspector(); refreshEmptyState();
 }
 
-function duplicateObject(obj) {
-  return addPrimitive(obj.type, {
+// Snapshot everything needed to recreate an object elsewhere: its ACTUAL geometry
+// (including any edit-mode extrudes/loop-cuts/vertex edits or imported meshes), not
+// just "make a fresh primitive of this type" (which used to silently discard edits).
+function cloneMeshDataFor(obj) {
+  return {
+    type: obj.type,
+    name: obj.name,
+    geomJSON: obj.mesh.geometry.toJSON(),
     color: '#' + obj.mesh.material.color.getHexString(),
-    position: obj.mesh.position.clone().add(new THREE.Vector3(0.6,0,0.6)),
-    rotation: obj.mesh.rotation.clone(),
-    scale: obj.mesh.scale.clone(),
-    map: obj.mesh.material.map || null,
-    roughness: obj.mesh.material.roughness,
-    metalness: obj.mesh.material.metalness
-  }, true);
+    rough: obj.mesh.material.roughness,
+    metal: obj.mesh.material.metalness,
+    opacity: obj.mesh.material.opacity,
+    mapImg: obj.mesh.material.map ? obj.mesh.material.map.image?.src : null,
+    pos: obj.mesh.position.clone(),
+    rot: obj.mesh.rotation.clone(),
+    scale: obj.mesh.scale.clone()
+  };
+}
+
+function createObjectFromClone(data, posOverride) {
+  const geoLoader = new THREE.BufferGeometryLoader();
+  const geo = geoLoader.parse(data.geomJSON);
+  const dupOpac = data.opacity ?? 1;
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(data.color),
+    roughness: data.rough,
+    metalness: data.metal,
+    opacity: dupOpac,
+    transparent: dupOpac < 0.99,
+    depthWrite: dupOpac >= 0.99,
+    side: data.type === 'plane' ? THREE.DoubleSide : THREE.FrontSide
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  mesh.position.copy(posOverride || data.pos);
+  mesh.rotation.copy(data.rot);
+  mesh.scale.copy(data.scale);
+  scene.add(mesh);
+  if (data.mapImg) {
+    new THREE.TextureLoader().load(data.mapImg, (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mat.map = tex; mat.needsUpdate = true; });
+  }
+  const id = idCounter++;
+  const count = objects.filter(o => o.type === data.type).length;
+  const obj = { id, mesh, name: data.name ? data.name + ' copy' : `${typeLabel[data.type]}${count>0?'.'+String(count).padStart(3,'0'):''}`, type: data.type };
+  objects.push(obj);
+  refreshOutliner();
+  refreshEmptyState();
+  return obj;
+}
+
+function duplicateObject(obj) {
+  const data = cloneMeshDataFor(obj);
+  const pos = obj.mesh.position.clone().add(new THREE.Vector3(0.6, 0, 0.6));
+  return createObjectFromClone(data, pos);
 }
 
 function duplicateSelected() {
@@ -922,6 +982,28 @@ function duplicateSelected() {
     return obj ? duplicateObject(obj) : null;
   }).filter(Boolean);
   setSelection(newObjs);
+}
+
+// ---- Copy / paste (Ctrl+C / Ctrl+V) ----
+let clipboard = [];
+function copySelected() {
+  if (selectedSet.size === 0) return;
+  clipboard = [...selectedSet].map(id => {
+    const obj = objects.find(o => o.id === id);
+    return obj ? cloneMeshDataFor(obj) : null;
+  }).filter(Boolean);
+  showToast(`Copied ${clipboard.length} object${clipboard.length !== 1 ? 's' : ''}`);
+}
+
+function pasteClipboard() {
+  if (clipboard.length === 0) return;
+  pushUndo();
+  const offset = new THREE.Vector3(0.6, 0, 0.6);
+  const newObjs = clipboard.map(data => createObjectFromClone(data, data.pos.clone().add(offset)));
+  // Nudge clipboard positions forward so a repeated paste keeps stepping outward
+  clipboard = clipboard.map((data, i) => ({ ...data, pos: newObjs[i].mesh.position.clone() }));
+  setSelection(newObjs);
+  showToast(`Pasted ${newObjs.length} object${newObjs.length !== 1 ? 's' : ''}`);
 }
 
 // Proxy group used so the gizmo can move/rotate/scale multiple objects together
@@ -996,14 +1078,111 @@ function restoreFromProxy() {
   proxyChildOffsets = [];
 }
 
+// ---- Edge-to-edge snapping helpers (used on top of grid snapping) ----
+// When snap-to-grid is on, moving or resizing a part close enough to a neighboring
+// part's edge will snap flush against it, in addition to the regular grid increments.
+const EDGE_SNAP_THRESHOLD = 0.3; // world units - how close an edge needs to be to trigger a snap
+let resizeSnapPrevBox = null;
+
+function boxesOverlapOtherAxes(a, b, axis, margin=0.02) {
+  const axes = ['x','y','z'].filter(ax => ax !== axis);
+  return axes.every(ax => a.max[ax] > b.min[ax] - margin && a.min[ax] < b.max[ax] + margin);
+}
+
+// Finds the smallest delta (along `axis`) needed to bring `box`'s given face flush
+// against the nearest candidate box, if one is within EDGE_SNAP_THRESHOLD.
+function computeFaceSnapDelta(box, candidates, axis, face) {
+  let best = null;
+  candidates.forEach(cbox => {
+    if (!boxesOverlapOtherAxes(box, cbox, axis)) return;
+    const d = face === 'max' ? (cbox.min[axis] - box.max[axis]) : (cbox.max[axis] - box.min[axis]);
+    if (Math.abs(d) < EDGE_SNAP_THRESHOLD && (best === null || Math.abs(d) < Math.abs(best))) best = d;
+  });
+  return best;
+}
+
+// For translate: checks both faces on this axis, returns whichever snap is closer (or null).
+function computeEdgeSnapDelta(movingBox, candidates, axis) {
+  const dMax = computeFaceSnapDelta(movingBox, candidates, axis, 'max');
+  const dMin = computeFaceSnapDelta(movingBox, candidates, axis, 'min');
+  if (dMax === null) return dMin;
+  if (dMin === null) return dMax;
+  return Math.abs(dMax) <= Math.abs(dMin) ? dMax : dMin;
+}
+
+// For resize: grows/shrinks just the moving edge, keeping the opposite edge fixed.
+// Assumes the mesh is axis-aligned (unrotated) - good enough for typical panel/box parts.
+function adjustMeshFaceOnAxis(mesh, axis, face, delta) {
+  const box = new THREE.Box3().setFromObject(mesh);
+  const size0 = box.max[axis] - box.min[axis];
+  if (size0 <= 1e-6) return;
+  const newSize = face === 'max' ? size0 + delta : size0 - delta;
+  if (newSize <= 0.001) return; // don't collapse/flip the mesh
+  const scaleFactor = newSize / size0;
+  mesh.scale[axis] *= scaleFactor;
+  mesh.position[axis] += delta / 2;
+}
+
+function applyResizeEdgeSnap(obj) {
+  if (!resizeSnapPrevBox) { resizeSnapPrevBox = new THREE.Box3().setFromObject(obj.mesh); return; }
+  const newBox = new THREE.Box3().setFromObject(obj.mesh);
+  const others = objects.filter(o => o.id !== obj.id).map(o => new THREE.Box3().setFromObject(o.mesh));
+  ['x','y','z'].forEach(axis => {
+    const grewMax = newBox.max[axis] - resizeSnapPrevBox.max[axis];
+    const grewMin = resizeSnapPrevBox.min[axis] - newBox.min[axis];
+    if (Math.abs(grewMax) > 1e-6 && Math.abs(grewMax) >= Math.abs(grewMin)) {
+      const d = computeFaceSnapDelta(newBox, others, axis, 'max');
+      if (d !== null) adjustMeshFaceOnAxis(obj.mesh, axis, 'max', d);
+    } else if (Math.abs(grewMin) > 1e-6) {
+      const d = computeFaceSnapDelta(newBox, others, axis, 'min');
+      if (d !== null) adjustMeshFaceOnAxis(obj.mesh, axis, 'min', d);
+    }
+  });
+  resizeSnapPrevBox = new THREE.Box3().setFromObject(obj.mesh);
+}
+
 // When dragging the proxy, propagate to real objects
 transformControls.addEventListener('objectChange', () => {
-  if (transformControls.object === multiProxy && proxyChildOffsets.length) {
+  const target = transformControls.object;
+
+  if (target === multiProxy && proxyChildOffsets.length) {
     proxyChildOffsets.forEach(({obj, relPos}) => {
       const rotatedOffset = relPos.clone().applyEuler(multiProxy.rotation).multiply(multiProxy.scale);
       obj.mesh.position.copy(multiProxy.position).add(rotatedOffset);
     });
   }
+
+  if (snapEnabled && target && (typeof editPivot === 'undefined' || target !== editPivot)) {
+    if (transformControls.mode === 'translate') {
+      let movingIds;
+      if (target === multiProxy) {
+        movingIds = new Set(proxyChildOffsets.map(p => p.obj.id));
+      } else {
+        const found = objects.find(o => o.mesh === target);
+        movingIds = new Set(found ? [found.id] : []);
+      }
+      if (movingIds.size > 0) {
+        const movingObjs = objects.filter(o => movingIds.has(o.id));
+        const movingBox = new THREE.Box3();
+        movingObjs.forEach((o, i) => {
+          const b = new THREE.Box3().setFromObject(o.mesh);
+          if (i === 0) movingBox.copy(b); else movingBox.union(b);
+        });
+        const others = objects.filter(o => !movingIds.has(o.id)).map(o => new THREE.Box3().setFromObject(o.mesh));
+        ['x','y','z'].forEach(axis => {
+          const d = computeEdgeSnapDelta(movingBox, others, axis);
+          if (d !== null) {
+            target.position[axis] += d;
+            if (target === multiProxy) movingObjs.forEach(o => o.mesh.position[axis] += d);
+          }
+        });
+      }
+    } else if (transformControls.mode === 'scale' && target !== multiProxy) {
+      const found = objects.find(o => o.mesh === target);
+      if (found) applyResizeEdgeSnap(found);
+    }
+  }
+
   updateInspectorTransform();
 });
 
@@ -1031,14 +1210,46 @@ function refreshOutliner() {
   objects.forEach(obj => {
     const row = document.createElement('div');
     row.className = 'outliner-item' + (selectedSet.has(obj.id) ? ' selected' : '');
+    const isGhosted = obj.mesh.material.opacity < 0.99;
     row.innerHTML = `
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${iconFor(obj.type)}</svg>
       <span class="name">${obj.name}</span>
       <div class="swatch" style="background:#${obj.mesh.material.color.getHexString()}"></div>
+      <svg class="vis-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" title="${isGhosted ? 'Restore full opacity' : 'Make see-through'}" style="${isGhosted ? 'opacity:1; color:var(--accent);' : ''}">${
+        isGhosted
+          ? '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" opacity="0.35"/><path d="M1 1l22 22"/>'
+          : '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>'
+      }</svg>
     `;
-    row.addEventListener('click', (e) => selectObject(obj, e.shiftKey || e.ctrlKey || e.metaKey));
+    row.querySelectorAll('svg:not(.vis-toggle), .name, .swatch').forEach(el =>
+      el.addEventListener('click', (e) => selectObject(obj, e.shiftKey || e.ctrlKey || e.metaKey))
+    );
+    row.querySelector('.vis-toggle').addEventListener('click', (e) => {
+      e.stopPropagation();
+      pushUndo();
+      toggleObjectGhost(obj);
+    });
     outlinerEl.appendChild(row);
   });
+}
+
+// Quick toggle between full opacity and a low "ghost" opacity (default 12%) from the
+// outliner eye icon. The object stays in the scene, selectable and editable — it's just
+// rendered see-through rather than removed, unlike a true show/hide.
+function toggleObjectGhost(obj) {
+  const mat = obj.mesh.material;
+  const isGhosted = mat.opacity < 0.99;
+  if (isGhosted) {
+    mat.opacity = obj.mesh.userData.preGhostOpacity ?? 1;
+  } else {
+    obj.mesh.userData.preGhostOpacity = mat.opacity;
+    mat.opacity = 0.12;
+  }
+  mat.transparent = mat.opacity < 0.99;
+  mat.depthWrite = mat.opacity >= 0.99;
+  mat.needsUpdate = true;
+  refreshOutliner();
+  if (selected === obj) refreshInspector();
 }
 
 function refreshEmptyState() {
@@ -1122,6 +1333,12 @@ function refreshInspector() {
       </div>
       <div class="swatch-presets" id="preset-row"></div>
 
+      <div class="field-label">Opacity</div>
+      <div class="slider-row">
+        <input type="range" min="0" max="1" step="0.01" id="f-opacity" value="${o.mesh.material.opacity}">
+        <span class="slider-val" id="opacity-val">${o.mesh.material.opacity.toFixed(2)}</span>
+      </div>
+
       <div class="field-label">Roughness</div>
       <div class="slider-row">
         <input type="range" min="0" max="1" step="0.01" id="f-rough" value="${rough}">
@@ -1156,8 +1373,20 @@ function refreshInspector() {
     presetRow.appendChild(sw);
   });
 
+  // Helper: push one undo snapshot the first time a field changes, not on every
+  // keystroke/drag-tick, so a slider drag or typed value is a single undo step.
+  function withUndoOnce(el) {
+    let pushed = false;
+    el.addEventListener('focus', () => { pushed = false; });
+    el.addEventListener('pointerdown', () => { pushed = false; });
+    return () => { if (!pushed) { pushUndo(); pushed = true; } };
+  }
+
   // Name
-  document.getElementById('f-name').addEventListener('change', (e) => {
+  const nameEl = document.getElementById('f-name');
+  const markName = withUndoOnce(nameEl);
+  nameEl.addEventListener('change', (e) => {
+    markName();
     o.name = e.target.value || o.name;
     refreshOutliner();
   });
@@ -1167,7 +1396,10 @@ function refreshInspector() {
   // Position/Rotation/Scale live inputs
   const bindXYZ = (prefix, target, isRot=false) => {
     ['x','y','z'].forEach(axis => {
-      document.getElementById(`${prefix}-${axis}`).addEventListener('input', (e) => {
+      const el = document.getElementById(`${prefix}-${axis}`);
+      const mark = withUndoOnce(el);
+      el.addEventListener('input', (e) => {
+        mark();
         const v = parseFloat(e.target.value);
         if (isNaN(v)) return;
         target[axis] = isRot ? THREE.MathUtils.degToRad(v) : v;
@@ -1178,24 +1410,48 @@ function refreshInspector() {
   bindXYZ('rot', o.mesh.rotation, true);
   bindXYZ('scl', o.mesh.scale);
 
-  function setColor(hexVal) {
+  function setColor(hexVal, mark) {
+    if (mark) mark();
     o.mesh.material.color.set(hexVal);
     document.getElementById('f-color').value = hexVal;
     document.getElementById('f-hex').value = hexVal;
     refreshOutliner();
   }
-  document.getElementById('f-color').addEventListener('input', (e) => setColor(e.target.value));
-  document.getElementById('f-hex').addEventListener('change', (e) => {
+  const colorEl = document.getElementById('f-color');
+  const markColor = withUndoOnce(colorEl);
+  colorEl.addEventListener('input', (e) => setColor(e.target.value, markColor));
+  const hexEl = document.getElementById('f-hex');
+  const markHex = withUndoOnce(hexEl);
+  hexEl.addEventListener('change', (e) => {
     let v = e.target.value.trim();
     if (!v.startsWith('#')) v = '#' + v;
-    if (/^#[0-9a-fA-F]{6}$/.test(v)) setColor(v);
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) setColor(v, markHex);
   });
 
-  document.getElementById('f-rough').addEventListener('input', (e) => {
+  const opacityEl = document.getElementById('f-opacity');
+  const markOpacity = withUndoOnce(opacityEl);
+  opacityEl.addEventListener('input', (e) => {
+    markOpacity();
+    const v = parseFloat(e.target.value);
+    o.mesh.material.opacity = v;
+    o.mesh.material.transparent = v < 0.99;
+    o.mesh.material.depthWrite = v >= 0.99;
+    o.mesh.material.needsUpdate = true;
+    document.getElementById('opacity-val').textContent = v.toFixed(2);
+    refreshOutliner();
+  });
+
+  const roughEl = document.getElementById('f-rough');
+  const markRough = withUndoOnce(roughEl);
+  roughEl.addEventListener('input', (e) => {
+    markRough();
     o.mesh.material.roughness = parseFloat(e.target.value);
     document.getElementById('rough-val').textContent = parseFloat(e.target.value).toFixed(2);
   });
-  document.getElementById('f-metal').addEventListener('input', (e) => {
+  const metalEl = document.getElementById('f-metal');
+  const markMetal = withUndoOnce(metalEl);
+  metalEl.addEventListener('input', (e) => {
+    markMetal();
     o.mesh.material.metalness = parseFloat(e.target.value);
     document.getElementById('metal-val').textContent = parseFloat(e.target.value).toFixed(2);
   });
@@ -1301,6 +1557,9 @@ window.addEventListener('keydown', (e) => {
 
   if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveProject(); return; }
   if ((e.key === 'o' || e.key === 'O') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); document.getElementById('file-load-project').click(); return; }
+  if ((e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); duplicateSelected(); return; }
+  if ((e.key === 'c' || e.key === 'C') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); copySelected(); return; }
+  if ((e.key === 'v' || e.key === 'V') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); pasteClipboard(); return; }
 
   if (editMode.active) {
     if (e.key === '1') setEditSelMode('vertex');
