@@ -798,6 +798,71 @@ function snapshotScene() {
   }));
 }
 
+// Reconstruct a geometry from either:
+//  (a) raw BufferGeometry JSON (has data.attributes / data.index), or
+//  (b) parametric geometry JSON produced by e.g. BoxGeometry.toJSON()
+//      (top-level "type":"BoxGeometry" plus params like width/height/depth,
+//      no "data" wrapper) — this is the shape saved-project files actually
+//      contain, and THREE.BufferGeometryLoader cannot parse it directly.
+function parseGeometryJSON(json, bufferLoader) {
+  if (!json) return new THREE.BoxGeometry(1, 1, 1);
+
+  // Raw BufferGeometry JSON always has a "data" object with attributes/index.
+  if (json.data && (json.data.attributes || json.data.index)) {
+    return bufferLoader.parse(json);
+  }
+
+  // Parametric geometry JSON: top-level type + numeric params, no "data".
+  const t = json.type;
+  const P = json; // params live at top level for these
+  switch (t) {
+    case 'BoxGeometry':
+      return new THREE.BoxGeometry(
+        P.width ?? 1, P.height ?? 1, P.depth ?? 1,
+        P.widthSegments ?? 1, P.heightSegments ?? 1, P.depthSegments ?? 1
+      );
+    case 'PlaneGeometry':
+      return new THREE.PlaneGeometry(
+        P.width ?? 1, P.height ?? 1,
+        P.widthSegments ?? 1, P.heightSegments ?? 1
+      );
+    case 'SphereGeometry':
+      return new THREE.SphereGeometry(
+        P.radius ?? 0.65, P.widthSegments ?? 32, P.heightSegments ?? 24,
+        P.phiStart ?? 0, P.phiLength ?? Math.PI * 2,
+        P.thetaStart ?? 0, P.thetaLength ?? Math.PI
+      );
+    case 'CylinderGeometry':
+      return new THREE.CylinderGeometry(
+        P.radiusTop ?? 0.6, P.radiusBottom ?? 0.6, P.height ?? 1.2,
+        P.radialSegments ?? 32, P.heightSegments ?? 1,
+        P.openEnded ?? false, P.thetaStart ?? 0, P.thetaLength ?? Math.PI * 2
+      );
+    case 'ConeGeometry':
+      return new THREE.ConeGeometry(
+        P.radius ?? 0.65, P.height ?? 1.3, P.radialSegments ?? 32,
+        P.heightSegments ?? 1, P.openEnded ?? false,
+        P.thetaStart ?? 0, P.thetaLength ?? Math.PI * 2
+      );
+    case 'TorusGeometry':
+      return new THREE.TorusGeometry(
+        P.radius ?? 0.55, P.tube ?? 0.22, P.radialSegments ?? 20,
+        P.tubularSegments ?? 40, P.arc ?? Math.PI * 2
+      );
+    default:
+      // Last resort: try the BufferGeometryLoader (covers any shape we
+      // haven't special-cased but that still happens to be raw buffer JSON),
+      // and fall back to a unit box if that also fails, so a bad/unknown
+      // geometry entry never aborts loading the whole project.
+      try {
+        return bufferLoader.parse(json);
+      } catch (err) {
+        console.warn('Unrecognized geometry JSON, using fallback box', t, err);
+        return new THREE.BoxGeometry(1, 1, 1);
+      }
+  }
+}
+
 function restoreScene(snap) {
   if (typeof editMode !== 'undefined' && editMode.active) {
     editMode.active = false;
@@ -817,7 +882,7 @@ function restoreScene(snap) {
 
   const geoLoader = new THREE.BufferGeometryLoader();
   snap.forEach(s => {
-    const geo = geoLoader.parse(s.geomJSON);
+    const geo = parseGeometryJSON(s.geomJSON, geoLoader);
     const opac = s.opacity ?? 1;
     const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(s.color), roughness: s.rough, metalness: s.metal, opacity: opac, transparent: opac < 0.99, depthWrite: opac >= 0.99, side: s.type==='plane' ? THREE.DoubleSide : THREE.FrontSide });
     const mesh = new THREE.Mesh(geo, mat);
@@ -827,7 +892,16 @@ function restoreScene(snap) {
     mesh.scale.fromArray(s.scale);
     scene.add(mesh);
     if (s.mapImg) {
-      new THREE.TextureLoader().load(s.mapImg, (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mat.map = tex; mat.needsUpdate = true; });
+      // Old project files may contain stale blob: URLs (from before textures
+      // were embedded as data URLs) which can no longer resolve to anything.
+      // Fail gracefully — keep the object visible untextured — rather than
+      // leaving the user wondering why nothing loaded.
+      new THREE.TextureLoader().load(
+        s.mapImg,
+        (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mat.map = tex; mat.needsUpdate = true; },
+        undefined,
+        () => console.warn(`Texture for "${s.name}" could not be loaded (stale blob: URL from an older save?)`)
+      );
     }
     objects.push({ id: s.id, mesh, name: s.name, type: s.type });
   });
@@ -1464,14 +1538,22 @@ function refreshInspector() {
   document.getElementById('f-tex-input').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    new THREE.TextureLoader().load(url, (tex) => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      pushUndo();
-      o.mesh.material.map = tex;
-      o.mesh.material.needsUpdate = true;
-      refreshInspector();
-    });
+    // Use a data URL (not a blob: URL) so the texture is embedded as real
+    // bytes. blob: URLs are only valid for the lifetime of the page/tab —
+    // saving one into a project JSON and reloading it later (or in a new
+    // session) leaves a dead reference and the texture silently fails to load.
+    const fr = new FileReader();
+    fr.onload = () => {
+      const dataUrl = fr.result;
+      new THREE.TextureLoader().load(dataUrl, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        pushUndo();
+        o.mesh.material.map = tex;
+        o.mesh.material.needsUpdate = true;
+        refreshInspector();
+      });
+    };
+    fr.readAsDataURL(file);
   });
   const clearBtn = document.getElementById('f-tex-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => {
