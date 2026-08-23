@@ -657,6 +657,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
 // ---------------- SCENE SETUP ----------------
@@ -675,6 +677,22 @@ renderer.setSize(wrap.clientWidth, wrap.clientHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+// Shared, fully-configured GLTF loader: registers Draco (compressed geometry)
+// and KTX2 (compressed/Basis-Universal textures) decoders. Without these,
+// GLTFLoader can still load the mesh's raw position/normal/uv data but the
+// material's texture (mat.map) silently ends up null for any glTF/GLB that
+// uses compressed textures or geometry — which many exporters (e.g. Blender,
+// glTF-Transform, various online converters) enable by default. That's what
+// was causing imported models to come in as flat gray with no texture.
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+const ktx2Loader = new KTX2Loader();
+ktx2Loader.setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/');
+ktx2Loader.detectSupport(renderer);
+const gltfLoader = new GLTFLoader();
+gltfLoader.setDRACOLoader(dracoLoader);
+gltfLoader.setKTX2Loader(ktx2Loader);
 
 // Lighting
 const hemi = new THREE.HemisphereLight(0x9fb4d1, 0x1a1a1e, 0.9);
@@ -780,6 +798,33 @@ const redoStack = [];
 
 const colorPresets = ['#ff8a3d','#e8636b','#5ec98f','#5b9dd9','#c77dff','#f7d154','#ffffff','#2d303a'];
 
+// Reliably turn a THREE.Texture's pixel data into a persistent base64 data
+// URL, regardless of how the texture was created. We can't trust
+// texture.image.src: for textures loaded via <input type=file> it may be a
+// blob: URL (dies on reload); for GLTFLoader/OBJLoader-decoded textures it's
+// often an ImageBitmap with no .src at all, or another internally-created
+// blob: URL. Drawing the image to a canvas and reading it back as a data URL
+// works uniformly for <img>, ImageBitmap, and canvas sources, and the result
+// is self-contained — safe to embed directly in the saved project JSON.
+function textureToDataURL(tex) {
+  const img = tex?.image;
+  if (!img || !(img.width || img.videoWidth)) return null;
+  try {
+    const w = img.width || img.videoWidth;
+    const h = img.height || img.videoHeight;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL('image/png');
+  } catch (err) {
+    // Most likely a tainted-canvas security error (cross-origin image with
+    // no CORS headers) — fall back to whatever .src we have, if any.
+    console.warn('Could not re-encode texture as data URL, falling back to image.src', err);
+    return img.src || null;
+  }
+}
+
 // Full-scene snapshot for undo/redo (handles add/delete/import, not just transform edits)
 function snapshotScene() {
   return objects.map(o => ({
@@ -794,7 +839,7 @@ function snapshotScene() {
     rough: o.mesh.material.roughness,
     metal: o.mesh.material.metalness,
     opacity: o.mesh.material.opacity,
-    mapImg: o.mesh.material.map ? o.mesh.material.map.image?.src : null
+    mapImg: o.mesh.material.map ? textureToDataURL(o.mesh.material.map) : null
   }));
 }
 
@@ -1003,7 +1048,7 @@ function cloneMeshDataFor(obj) {
     rough: obj.mesh.material.roughness,
     metal: obj.mesh.material.metalness,
     opacity: obj.mesh.material.opacity,
-    mapImg: obj.mesh.material.map ? obj.mesh.material.map.image?.src : null,
+    map: obj.mesh.material.map || null,
     pos: obj.mesh.position.clone(),
     rot: obj.mesh.rotation.clone(),
     scale: obj.mesh.scale.clone()
@@ -1033,8 +1078,9 @@ function createObjectFromClone(data, posOverride) {
   mesh.rotation.copy(data.rot);
   mesh.scale.copy(data.scale);
   scene.add(mesh);
-  if (data.mapImg) {
-    new THREE.TextureLoader().load(data.mapImg, (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mat.map = tex; mat.needsUpdate = true; });
+  if (data.map) {
+    mat.map = data.map;
+    mat.needsUpdate = true;
   }
   const id = idCounter++;
   const count = objects.filter(o => o.type === data.type).length;
@@ -1816,7 +1862,7 @@ document.getElementById('file-import').addEventListener('change', (e) => {
   };
 
   if (ext === 'glb' || ext === 'gltf') {
-    new GLTFLoader().load(url, (gltf) => finishImport(gltf.scene, file.name.replace(/\.(glb|gltf)$/i,'')), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
+    gltfLoader.load(url, (gltf) => finishImport(gltf.scene, file.name.replace(/\.(glb|gltf)$/i,'')), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
   } else if (ext === 'obj') {
     new OBJLoader().load(url, (objRoot) => finishImport(objRoot, file.name.replace(/\.obj$/i,'')), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
   } else {
