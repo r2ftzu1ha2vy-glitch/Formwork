@@ -23,6 +23,24 @@
     --red:#e8636b;
     --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --canvas-radial-0:#1e2027;
+  }
+  :root[data-theme="light"]{
+    --bg-0:#eef0f4;
+    --bg-1:#ffffff;
+    --bg-2:#f2f3f7;
+    --bg-3:#e5e7ee;
+    --line:#d4d7e0;
+    --text-0:#1c1e24;
+    --text-1:#565a68;
+    --text-2:#888c99;
+    --accent:#ff7a1f;
+    --accent-dim:#ffe3cc;
+    --accent-glow:rgba(255,122,31,0.28);
+    --green:#2f9e63;
+    --blue:#2e73b8;
+    --red:#d1414a;
+    --canvas-radial-0:#e3e5eb;
   }
   *{box-sizing:border-box; margin:0; padding:0;}
   html,body{
@@ -205,7 +223,7 @@
     grid-area:canvas;
     position:relative;
     background:
-      radial-gradient(ellipse at 50% 30%, #1e2027 0%, var(--bg-0) 70%);
+      radial-gradient(ellipse at 50% 30%, var(--canvas-radial-0) 0%, var(--bg-0) 70%);
     overflow:hidden;
   }
   #three-canvas{ display:block; width:100%; height:100%; }
@@ -437,6 +455,29 @@
   .format-opt .fmt-desc{ font-size:10.5px; color:var(--text-2); margin-top:2px; }
   .modal-actions{ display:flex; gap:8px; justify-content:flex-end; }
 
+  /* ---------- Settings modal ---------- */
+  .modal.settings-modal{ width:420px; }
+  .setting-row{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:14px; padding:12px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .setting-row:last-of-type{ border-bottom:none; }
+  .setting-label{ display:flex; flex-direction:column; gap:2px; }
+  .setting-label .st-name{ font-size:12.5px; font-weight:600; color:var(--text-0); }
+  .setting-label .st-desc{ font-size:11px; color:var(--text-2); line-height:1.4; max-width:260px; }
+  .seg-control{
+    display:flex; background:var(--bg-2); border:1px solid var(--line);
+    border-radius:7px; padding:2px; flex-shrink:0;
+  }
+  .seg-opt{
+    padding:6px 12px; font-size:11.5px; font-weight:600;
+    border-radius:5px; cursor:pointer; color:var(--text-1);
+    transition:all .12s; white-space:nowrap;
+  }
+  .seg-opt.active{ background:var(--accent-dim); color:var(--accent); }
+  .seg-opt:hover:not(.active){ color:var(--text-0); }
+
   ::-webkit-scrollbar{ width:9px; height:9px; }
   ::-webkit-scrollbar-track{ background:transparent; }
   ::-webkit-scrollbar-thumb{ background:#3a3d48; border-radius:5px; }
@@ -532,6 +573,9 @@
     <button class="btn primary" id="btn-export">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
       Export GLB
+    </button>
+    <button class="btn" id="btn-settings" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
   </div>
 
@@ -633,6 +677,50 @@
     <div class="modal-actions">
       <button class="btn" id="export-cancel">Cancel</button>
       <button class="btn primary" id="export-confirm">Download</button>
+    </div>
+  </div>
+</div>
+
+<div id="settings-overlay" class="modal-overlay-base" style="position:fixed; inset:0; background:rgba(10,10,12,0.6); display:none; align-items:center; justify-content:center; z-index:100; backdrop-filter: blur(3px);">
+  <div class="modal settings-modal">
+    <h3>Settings</h3>
+    <p>Configure how resizing, adding, and the interface behave.</p>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="st-name">Resize mode</span>
+        <span class="st-desc">Symmetric grows/shrinks from the center, both sides move. One-sided keeps the opposite face fixed, like Roblox.</span>
+      </div>
+      <div class="seg-control" id="resize-mode-control">
+        <div class="seg-opt active" data-value="symmetric">Symmetric</div>
+        <div class="seg-opt" data-value="one-sided">One-Sided</div>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="st-name">Snap-to-neighbor while resizing</span>
+        <span class="st-desc">When on and "Snap to grid" (bottom bar) is enabled, resizing an object near another one will pull the growing edge flush against it. This is what causes an object to shift position mid-resize. Turn off if that movement is unwanted.</span>
+      </div>
+      <div class="seg-control" id="resize-neighbor-snap-control">
+        <div class="seg-opt active" data-value="on">On</div>
+        <div class="seg-opt" data-value="off">Off</div>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="st-name">Theme</span>
+        <span class="st-desc">Switch between dark and light interface colors.</span>
+      </div>
+      <div class="seg-control" id="theme-control">
+        <div class="seg-opt active" data-value="dark">Dark</div>
+        <div class="seg-opt" data-value="light">Light</div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn primary" id="settings-close">Done</button>
     </div>
   </div>
 </div>
@@ -770,21 +858,76 @@ orbit.update();
 const transformControls = new TransformControls(camera, renderer.domElement);
 transformControls.setSpace('world');
 scene.add(transformControls.getHelper ? transformControls.getHelper() : transformControls);
+
+// One-sided resize (Roblox-style): TransformControls' scale handles always scale about the
+// object's own origin, which moves both faces on that axis symmetrically. To make only the
+// dragged face move, we record the object's pre-drag world-space bounding box and, on every
+// scale tick, shove the mesh back so the OPPOSITE face stays pinned at its pre-drag position.
+let oneSidedPrevBox = null;
+let oneSidedPrevScale = null;
+let oneSidedPinFace = null; // {x:'min'|'max'|null, y:..., z:...} decided ONCE at drag start
+
 transformControls.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value;
   if (e.value) {
     // Drag just started: snapshot the scene NOW so undo reverts this one move/rotate/scale,
     // instead of skipping past it to whatever the last tracked action was.
     pushUndo();
-    if (transformControls.mode === 'scale' && transformControls.object && transformControls.object !== multiProxy && typeof editPivot !== 'undefined' && transformControls.object !== editPivot) {
-      resizeSnapPrevBox = new THREE.Box3().setFromObject(transformControls.object);
+    const target = transformControls.object;
+    const isRealMesh = target && target !== multiProxy && (typeof editPivot === 'undefined' || target !== editPivot);
+    if (transformControls.mode === 'scale' && isRealMesh) {
+      resizeSnapPrevBox = new THREE.Box3().setFromObject(target);
+      oneSidedPrevBox = new THREE.Box3().setFromObject(target);
+      oneSidedPrevScale = target.scale.clone();
+      oneSidedPinFace = null; // undecided until the first tick of this drag reveals which handle moved
     } else {
       resizeSnapPrevBox = null;
+      oneSidedPrevBox = null;
+      oneSidedPrevScale = null;
+      oneSidedPinFace = null;
     }
   } else {
     resizeSnapPrevBox = null;
+    oneSidedPrevBox = null;
+    oneSidedPrevScale = null;
   }
 });
+
+// Applies the one-sided compensation: for each axis whose scale changed this tick, figure out
+// which face moved (the one that grew away from the anchor) and translate the mesh so the
+// OTHER face returns to where it was before this tick, then updates the tracked prev box/scale.
+function applyOneSidedResize(target) {
+  if (resizeMode !== 'one-sided' || !oneSidedPrevBox || !oneSidedPrevScale) return;
+  if (!oneSidedPinFace) oneSidedPinFace = {};
+  const newBox = new THREE.Box3().setFromObject(target);
+  ['x','y','z'].forEach(axis => {
+    const scaleChanged = Math.abs(target.scale[axis] - oneSidedPrevScale[axis]) > 1e-9;
+    if (!scaleChanged) return;
+    // Decide which face is being dragged ONCE per drag (on the first tick that this axis's
+    // scale actually changes), then keep pinning that same face for the rest of the drag.
+    // Re-deciding every tick from the current growMax/growMin comparison is what caused the
+    // jump: once the dragged face's growth shrinks toward zero (e.g. near the far end of a
+    // handle drag, or from float noise), the comparison can flip which face is "moving",
+    // and the code would suddenly start pinning the opposite face instead — snapping the
+    // mesh sideways.
+    if (!oneSidedPinFace[axis]) {
+      const growMax = newBox.max[axis] - oneSidedPrevBox.max[axis];
+      const growMin = oneSidedPrevBox.min[axis] - newBox.min[axis];
+      oneSidedPinFace[axis] = Math.abs(growMax) >= Math.abs(growMin) ? 'min' : 'max';
+    }
+    if (oneSidedPinFace[axis] === 'min') {
+      // pin min face: shift so new min == old min
+      const shift = oneSidedPrevBox.min[axis] - newBox.min[axis];
+      target.position[axis] += shift;
+    } else {
+      // pin max face: shift so new max == old max
+      const shift = oneSidedPrevBox.max[axis] - newBox.max[axis];
+      target.position[axis] += shift;
+    }
+  });
+  oneSidedPrevBox = new THREE.Box3().setFromObject(target);
+  oneSidedPrevScale = target.scale.clone();
+}
 
 
 // ---------------- STATE ----------------
@@ -793,10 +936,19 @@ let selected = null;   // primary selection (drives inspector + gizmo)
 let selectedSet = new Set(); // ids of all selected objects (multi-select)
 let idCounter = 1;
 let snapEnabled = false;
+let resizeMode = 'symmetric'; // 'symmetric' | 'one-sided'
+let resizeNeighborSnapEnabled = true; // whether scaling near another object snaps flush against it
 const undoStack = [];
 const redoStack = [];
 
 const colorPresets = ['#ff8a3d','#e8636b','#5ec98f','#5b9dd9','#c77dff','#f7d154','#ffffff','#2d303a'];
+
+// Disposes a mesh's material regardless of whether it's a single MeshStandardMaterial
+// or a per-face array (box faces with independent textures), including each face's map.
+function disposeMaterial(mat) {
+  const list = Array.isArray(mat) ? mat : [mat];
+  list.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
+}
 
 // Reliably turn a THREE.Texture's pixel data into a persistent base64 data
 // URL, regardless of how the texture was created. We can't trust
@@ -825,22 +977,44 @@ function textureToDataURL(tex) {
   }
 }
 
+// Serializes one MeshStandardMaterial into a plain-data record, including its
+// texture (as a persistent data URL, not a live Texture reference).
+function serializeMaterial(m) {
+  return {
+    color: '#' + m.color.getHexString(),
+    rough: m.roughness,
+    metal: m.metalness,
+    opacity: m.opacity,
+    emissive: '#' + m.emissive.getHexString(),
+    emissiveIntensity: m.emissiveIntensity ?? 0,
+    mapImg: m.map ? textureToDataURL(m.map) : null
+  };
+}
+
 // Full-scene snapshot for undo/redo (handles add/delete/import, not just transform edits)
 function snapshotScene() {
-  return objects.map(o => ({
-    id: o.id,
-    name: o.name,
-    type: o.type,
-    geomJSON: o.mesh.geometry.toJSON(),
-    pos: o.mesh.position.toArray(),
-    rot: o.mesh.rotation.toArray().slice(0,3),
-    scale: o.mesh.scale.toArray(),
-    color: '#' + o.mesh.material.color.getHexString(),
-    rough: o.mesh.material.roughness,
-    metal: o.mesh.material.metalness,
-    opacity: o.mesh.material.opacity,
-    mapImg: o.mesh.material.map ? textureToDataURL(o.mesh.material.map) : null
-  }));
+  return objects.map(o => {
+    const isMulti = Array.isArray(o.mesh.material);
+    const primary = isMulti ? o.mesh.material[0] : o.mesh.material;
+    return {
+      id: o.id,
+      name: o.name,
+      type: o.type,
+      geomJSON: o.mesh.geometry.toJSON(),
+      pos: o.mesh.position.toArray(),
+      rot: o.mesh.rotation.toArray().slice(0,3),
+      scale: o.mesh.scale.toArray(),
+      color: '#' + primary.color.getHexString(),
+      rough: primary.roughness,
+      metal: primary.metalness,
+      opacity: primary.opacity,
+      emissive: '#' + primary.emissive.getHexString(),
+      emissiveIntensity: primary.emissiveIntensity ?? 0,
+      mapImg: !isMulti && primary.map ? textureToDataURL(primary.map) : null,
+      faceMaterials: isMulti ? o.mesh.material.map(serializeMaterial) : null,
+      faceLabels: o.faceLabels ? { ...o.faceLabels } : null
+    };
+  });
 }
 
 // Reconstruct a geometry from either:
@@ -920,7 +1094,7 @@ function restoreScene(snap) {
     document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.style.pointerEvents = '');
   }
   // clear current
-  objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
+  objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); disposeMaterial(o.mesh.material); });
   objects = [];
   transformControls.detach();
   selected = null; selectedSet.clear();
@@ -929,26 +1103,67 @@ function restoreScene(snap) {
   snap.forEach(s => {
     const geo = parseGeometryJSON(s.geomJSON, geoLoader);
     const opac = s.opacity ?? 1;
-    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(s.color), roughness: s.rough, metalness: s.metal, opacity: opac, transparent: opac < 0.99, depthWrite: opac >= 0.99, side: s.type==='plane' ? THREE.DoubleSide : THREE.FrontSide });
-    const mesh = new THREE.Mesh(geo, mat);
+    const baseSide = (s.type==='plane' || s.type==='text') ? THREE.DoubleSide : THREE.FrontSide;
+
+    let mesh, primaryMat;
+    if (s.faceMaterials) {
+      // Per-face box: rebuild the 6-entry material array and reapply the box's
+      // material groups (parseGeometryJSON returns a fresh geometry with no
+      // groups set, since geometry JSON doesn't round-trip .groups).
+      const mats = s.faceMaterials.map(fm => {
+        const m = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(fm.color), roughness: fm.rough, metalness: fm.metal,
+          opacity: fm.opacity, transparent: fm.opacity < 0.99 || !!fm.mapImg, depthWrite: fm.opacity >= 0.99,
+          side: baseSide
+        });
+        if (fm.emissive) m.emissive.set(fm.emissive);
+        if (fm.emissiveIntensity) m.emissiveIntensity = fm.emissiveIntensity;
+        return m;
+      });
+      geo.clearGroups();
+      const triCount = geo.index ? geo.index.count / 3 : geo.attributes.position.count / 3;
+      if (triCount === 12) {
+        for (let f = 0; f < 6; f++) geo.addGroup(f * 6, 6, f);
+      } else {
+        geo.addGroup(0, geo.index ? geo.index.count : geo.attributes.position.count, 0);
+      }
+      mesh = new THREE.Mesh(geo, mats);
+      primaryMat = mats[0];
+      s.faceMaterials.forEach((fm, i) => {
+        if (!fm.mapImg) return;
+        new THREE.TextureLoader().load(
+          fm.mapImg,
+          (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mats[i].map = tex; mats[i].needsUpdate = true; },
+          undefined,
+          () => console.warn(`Face texture for "${s.name}" (${FACE_ORDER[i]}) could not be loaded`)
+        );
+      });
+    } else {
+      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(s.color), roughness: s.rough, metalness: s.metal, opacity: opac, transparent: opac < 0.99, depthWrite: opac >= 0.99, side: baseSide });
+      if (s.emissive) mat.emissive.set(s.emissive);
+      if (s.emissiveIntensity) mat.emissiveIntensity = s.emissiveIntensity;
+      mesh = new THREE.Mesh(geo, mat);
+      primaryMat = mat;
+      if (s.mapImg) {
+        // Old project files may contain stale blob: URLs (from before textures
+        // were embedded as data URLs) which can no longer resolve to anything.
+        // Fail gracefully — keep the object visible untextured — rather than
+        // leaving the user wondering why nothing loaded.
+        new THREE.TextureLoader().load(
+          s.mapImg,
+          (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mat.map = tex; mat.needsUpdate = true; },
+          undefined,
+          () => console.warn(`Texture for "${s.name}" could not be loaded (stale blob: URL from an older save?)`)
+        );
+      }
+    }
+
     mesh.castShadow = true; mesh.receiveShadow = true;
     mesh.position.fromArray(s.pos);
     mesh.rotation.set(s.rot[0], s.rot[1], s.rot[2]);
     mesh.scale.fromArray(s.scale);
     scene.add(mesh);
-    if (s.mapImg) {
-      // Old project files may contain stale blob: URLs (from before textures
-      // were embedded as data URLs) which can no longer resolve to anything.
-      // Fail gracefully — keep the object visible untextured — rather than
-      // leaving the user wondering why nothing loaded.
-      new THREE.TextureLoader().load(
-        s.mapImg,
-        (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mat.map = tex; mat.needsUpdate = true; },
-        undefined,
-        () => console.warn(`Texture for "${s.name}" could not be loaded (stale blob: URL from an older save?)`)
-      );
-    }
-    objects.push({ id: s.id, mesh, name: s.name, type: s.type });
+    objects.push({ id: s.id, mesh, name: s.name, type: s.type, faceLabels: s.faceLabels ? { ...s.faceLabels } : undefined });
   });
   idCounter = Math.max(1, ...objects.map(o=>o.id), idCounter) + 1;
   refreshOutliner(); refreshInspector(); refreshEmptyState();
@@ -986,7 +1201,7 @@ function makeGeometry(type) {
   }
 }
 
-const typeLabel = { box:'Cube', sphere:'Sphere', cylinder:'Cylinder', cone:'Cone', torus:'Torus', plane:'Plane', imported:'Import' };
+const typeLabel = { box:'Cube', sphere:'Sphere', cylinder:'Cylinder', cone:'Cone', torus:'Torus', plane:'Plane', imported:'Import', text:'Text', neon:'Neon' };
 
 function addPrimitive(type, opts={}, skipSelect=false) {
   const geo = makeGeometry(type);
@@ -1019,7 +1234,8 @@ function addPrimitive(type, opts={}, skipSelect=false) {
 function deleteObject(obj) {
   scene.remove(obj.mesh);
   obj.mesh.geometry.dispose();
-  obj.mesh.material.dispose();
+  disposeMaterial(obj.mesh.material);
+  removeSelectionOutlineFor(obj.id);
   objects = objects.filter(o => o.id !== obj.id);
   selectedSet.delete(obj.id);
 }
@@ -1040,18 +1256,33 @@ function deleteSelected() {
 // (including any edit-mode extrudes/loop-cuts/vertex edits or imported meshes), not
 // just "make a fresh primitive of this type" (which used to silently discard edits).
 function cloneMeshDataFor(obj) {
+  const isMulti = Array.isArray(obj.mesh.material);
+  const m = isMulti ? obj.mesh.material[0] : obj.mesh.material;
   return {
     type: obj.type,
     name: obj.name,
     geometry: obj.mesh.geometry.clone(),
-    color: '#' + obj.mesh.material.color.getHexString(),
-    rough: obj.mesh.material.roughness,
-    metal: obj.mesh.material.metalness,
-    opacity: obj.mesh.material.opacity,
-    map: obj.mesh.material.map || null,
+    color: '#' + m.color.getHexString(),
+    rough: m.roughness,
+    metal: m.metalness,
+    opacity: m.opacity,
+    emissive: '#' + m.emissive.getHexString(),
+    emissiveIntensity: m.emissiveIntensity ?? 0,
+    map: !isMulti && m.map ? m.map : null,
+    doubleSided: m.side === THREE.DoubleSide,
     pos: obj.mesh.position.clone(),
     rot: obj.mesh.rotation.clone(),
-    scale: obj.mesh.scale.clone()
+    scale: obj.mesh.scale.clone(),
+    // Per-face materials are cloned as fresh materials (sharing the same texture
+    // objects — cheap, and textures are immutable from the duplicate's perspective)
+    // so editing one copy's face texture later never mutates the original's.
+    faceMaterials: isMulti ? obj.mesh.material.map(fm => ({
+      color: '#' + fm.color.getHexString(), rough: fm.roughness, metal: fm.metalness,
+      opacity: fm.opacity, emissive: '#' + fm.emissive.getHexString(),
+      emissiveIntensity: fm.emissiveIntensity ?? 0, map: fm.map || null
+    })) : null,
+    faceLabels: obj.faceLabels ? { ...obj.faceLabels } : null,
+    geoGroups: isMulti ? obj.mesh.geometry.groups.map(g => ({ ...g })) : null
   };
 }
 
@@ -1063,28 +1294,54 @@ function createObjectFromClone(data, posOverride) {
     return createObjectFromClone({ ...data, geometry: new THREE.BoxGeometry(1,1,1) }, posOverride);
   }
   const dupOpac = data.opacity ?? 1;
-  const mat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(data.color),
-    roughness: data.rough,
-    metalness: data.metal,
-    opacity: dupOpac,
-    transparent: dupOpac < 0.99,
-    depthWrite: dupOpac >= 0.99,
-    side: data.type === 'plane' ? THREE.DoubleSide : THREE.FrontSide
-  });
-  const mesh = new THREE.Mesh(geo, mat);
+  const side = (data.type === 'plane' || data.type === 'text' || data.doubleSided) ? THREE.DoubleSide : THREE.FrontSide;
+
+  let mesh, mat;
+  if (data.faceMaterials) {
+    const mats = data.faceMaterials.map(fm => {
+      const m = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(fm.color), roughness: fm.rough, metalness: fm.metal,
+        opacity: fm.opacity, transparent: fm.opacity < 0.99 || !!fm.map, depthWrite: fm.opacity >= 0.99,
+        side
+      });
+      if (fm.emissive) m.emissive.set(fm.emissive);
+      if (fm.emissiveIntensity) m.emissiveIntensity = fm.emissiveIntensity;
+      if (fm.map) { m.map = fm.map; m.needsUpdate = true; }
+      return m;
+    });
+    if (data.geoGroups) {
+      geo.clearGroups();
+      data.geoGroups.forEach(g => geo.addGroup(g.start, g.count, g.materialIndex));
+    }
+    mesh = new THREE.Mesh(geo, mats);
+    mat = mats[0];
+  } else {
+    mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(data.color),
+      roughness: data.rough,
+      metalness: data.metal,
+      opacity: dupOpac,
+      transparent: dupOpac < 0.99,
+      depthWrite: dupOpac >= 0.99,
+      side
+    });
+    if (data.emissive) mat.emissive.set(data.emissive);
+    if (data.emissiveIntensity) mat.emissiveIntensity = data.emissiveIntensity;
+    mesh = new THREE.Mesh(geo, mat);
+    if (data.map) {
+      mat.map = data.map;
+      mat.needsUpdate = true;
+    }
+  }
   mesh.castShadow = true; mesh.receiveShadow = true;
   mesh.position.copy(posOverride || data.pos);
   mesh.rotation.copy(data.rot);
   mesh.scale.copy(data.scale);
   scene.add(mesh);
-  if (data.map) {
-    mat.map = data.map;
-    mat.needsUpdate = true;
-  }
+
   const id = idCounter++;
   const count = objects.filter(o => o.type === data.type).length;
-  const obj = { id, mesh, name: data.name ? data.name + ' copy' : `${typeLabel[data.type]}${count>0?'.'+String(count).padStart(3,'0'):''}`, type: data.type };
+  const obj = { id, mesh, name: data.name ? data.name + ' copy' : `${typeLabel[data.type]}${count>0?'.'+String(count).padStart(3,'0'):''}`, type: data.type, faceLabels: data.faceLabels ? { ...data.faceLabels } : undefined };
   objects.push(obj);
   refreshOutliner();
   refreshEmptyState();
@@ -1167,12 +1424,43 @@ function selectObject(obj, additive=false) {
   }
 }
 
+// Selection highlight: a separate orange wireframe box drawn around each selected object,
+// NOT a material property change. Previously this function set mesh.material.emissive
+// directly to fake a glow-on-select effect, which meant deselecting an object silently
+// reset its emissive to black — wiping out any real neon glow color the user picked in
+// the inspector. Outline helpers keep selection state fully independent of material data.
+const selectionOutlines = new Map(); // object id -> THREE.BoxHelper
 function applySelectionOutlines() {
+  const selIds = new Set(selectedSet);
+  // Remove outlines for objects no longer selected (or deleted)
+  for (const [id, helper] of selectionOutlines) {
+    if (!selIds.has(id) || !objects.find(o => o.id === id)) {
+      scene.remove(helper);
+      helper.geometry.dispose();
+      helper.material.dispose();
+      selectionOutlines.delete(id);
+    }
+  }
+  // Add outlines for newly selected objects
   objects.forEach(o => {
-    const isSel = selectedSet.has(o.id);
-    o.mesh.material.emissive = o.mesh.material.emissive || new THREE.Color(0);
-    o.mesh.material.emissive.set(isSel ? 0x3a2000 : 0x000000);
+    if (selIds.has(o.id) && !selectionOutlines.has(o.id)) {
+      const helper = new THREE.BoxHelper(o.mesh, 0xff8a3d);
+      helper.material.depthTest = false;
+      helper.material.transparent = true;
+      helper.material.opacity = 0.9;
+      scene.add(helper);
+      selectionOutlines.set(o.id, helper);
+    }
   });
+}
+function removeSelectionOutlineFor(id) {
+  const helper = selectionOutlines.get(id);
+  if (helper) {
+    scene.remove(helper);
+    helper.geometry.dispose();
+    helper.material.dispose();
+    selectionOutlines.delete(id);
+  }
 }
 
 function attachGizmoToSelection() {
@@ -1244,7 +1532,14 @@ function adjustMeshFaceOnAxis(mesh, axis, face, delta) {
   if (newSize <= 0.001) return; // don't collapse/flip the mesh
   const scaleFactor = newSize / size0;
   mesh.scale[axis] *= scaleFactor;
-  mesh.position[axis] += delta / 2;
+  // Scaling the mesh about its own origin moves BOTH faces symmetrically by
+  // (newSize-size0)/2 = delta/2 in the direction that face is growing. To keep
+  // the *opposite* face pinned, shift the mesh by the amount needed so only the
+  // target face actually moves by `delta`: +delta/2 when growing the max face
+  // (pins min), and -delta/2 when growing the min face (pins max). Using the
+  // same sign for both cases (the old bug) left the mesh drifting whenever the
+  // min face was the one being snapped/resized.
+  mesh.position[axis] += face === 'max' ? delta / 2 : -delta / 2;
 }
 
 function applyResizeEdgeSnap(obj) {
@@ -1301,10 +1596,18 @@ transformControls.addEventListener('objectChange', () => {
           }
         });
       }
-    } else if (transformControls.mode === 'scale' && target !== multiProxy) {
+    } else if (transformControls.mode === 'scale' && target !== multiProxy && resizeMode !== 'one-sided' && resizeNeighborSnapEnabled) {
+      // Edge-to-neighbor snapping during resize only makes sense in Symmetric mode. In
+      // One-Sided mode, applyOneSidedResize below already pins the opposite face itself —
+      // running both would fight over mesh.position on the same tick and read as random
+      // jitter/drift while dragging a scale handle.
       const found = objects.find(o => o.mesh === target);
       if (found) applyResizeEdgeSnap(found);
     }
+  }
+
+  if (transformControls.mode === 'scale' && target && target !== multiProxy && (typeof editPivot === 'undefined' || target !== editPivot)) {
+    applyOneSidedResize(target);
   }
 
   updateInspectorTransform();
@@ -1320,7 +1623,9 @@ const iconFor = (type) => {
     cone:'<ellipse cx="12" cy="19" rx="8" ry="3"/><path d="M12 2 4 19M12 2l8 17"/>',
     torus:'<ellipse cx="12" cy="12" rx="9" ry="5.5"/><ellipse cx="12" cy="12" rx="3.2" ry="1.9"/>',
     plane:'<path d="M3 8 12 4 21 8 12 12 Z"/>',
-    imported:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/>'
+    imported:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/>',
+    text:'<path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/>',
+    neon:'<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/>'
   };
   return icons[type] || icons.box;
 };
@@ -1334,11 +1639,12 @@ function refreshOutliner() {
   objects.forEach(obj => {
     const row = document.createElement('div');
     row.className = 'outliner-item' + (selectedSet.has(obj.id) ? ' selected' : '');
-    const isGhosted = obj.mesh.material.opacity < 0.99;
+    const rowMat = Array.isArray(obj.mesh.material) ? obj.mesh.material[0] : obj.mesh.material;
+    const isGhosted = rowMat.opacity < 0.99;
     row.innerHTML = `
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${iconFor(obj.type)}</svg>
       <span class="name">${obj.name}</span>
-      <div class="swatch" style="background:#${obj.mesh.material.color.getHexString()}"></div>
+      <div class="swatch" style="background:#${rowMat.color.getHexString()}"></div>
       <svg class="vis-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" title="${isGhosted ? 'Restore full opacity' : 'Make see-through'}" style="${isGhosted ? 'opacity:1; color:var(--accent);' : ''}">${
         isGhosted
           ? '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" opacity="0.35"/><path d="M1 1l22 22"/>'
@@ -1361,17 +1667,17 @@ function refreshOutliner() {
 // outliner eye icon. The object stays in the scene, selectable and editable — it's just
 // rendered see-through rather than removed, unlike a true show/hide.
 function toggleObjectGhost(obj) {
-  const mat = obj.mesh.material;
-  const isGhosted = mat.opacity < 0.99;
-  if (isGhosted) {
-    mat.opacity = obj.mesh.userData.preGhostOpacity ?? 1;
-  } else {
-    obj.mesh.userData.preGhostOpacity = mat.opacity;
-    mat.opacity = 0.12;
-  }
-  mat.transparent = mat.opacity < 0.99;
-  mat.depthWrite = mat.opacity >= 0.99;
-  mat.needsUpdate = true;
+  const matList = Array.isArray(obj.mesh.material) ? obj.mesh.material : [obj.mesh.material];
+  const primaryMat = matList[0];
+  const isGhosted = primaryMat.opacity < 0.99;
+  const newOpacity = isGhosted ? (obj.mesh.userData.preGhostOpacity ?? 1) : 0.12;
+  if (!isGhosted) obj.mesh.userData.preGhostOpacity = primaryMat.opacity;
+  matList.forEach(mat => {
+    mat.opacity = newOpacity;
+    mat.transparent = mat.opacity < 0.99 || !!mat.map;
+    mat.depthWrite = mat.opacity >= 0.99;
+    mat.needsUpdate = true;
+  });
   refreshOutliner();
   if (selected === obj) refreshInspector();
 }
@@ -1416,9 +1722,16 @@ function refreshInspector() {
   }
   const o = selected;
   const p = o.mesh.position, r = o.mesh.rotation, s = o.mesh.scale;
-  const hex = '#' + o.mesh.material.color.getHexString();
-  const rough = o.mesh.material.roughness;
-  const metal = o.mesh.material.metalness;
+  // Multi-material (per-face textured) meshes read/write their base color, roughness,
+  // metalness, opacity and emissive as a group — every face material updates together —
+  // while each face keeps its own independent texture (.map) via applyFaceTexture.
+  const matList = Array.isArray(o.mesh.material) ? o.mesh.material : [o.mesh.material];
+  const primaryMat = matList[0];
+  const hex = '#' + primaryMat.color.getHexString();
+  const rough = primaryMat.roughness;
+  const metal = primaryMat.metalness;
+  const emissiveInt = primaryMat.emissiveIntensity ?? 0;
+  const emissiveHex = '#' + (primaryMat.emissive ? primaryMat.emissive.getHexString() : '000000');
 
   inspEl.innerHTML = `
     <div class="insp-section">
@@ -1459,8 +1772,8 @@ function refreshInspector() {
 
       <div class="field-label">Opacity</div>
       <div class="slider-row">
-        <input type="range" min="0" max="1" step="0.01" id="f-opacity" value="${o.mesh.material.opacity}">
-        <span class="slider-val" id="opacity-val">${o.mesh.material.opacity.toFixed(2)}</span>
+        <input type="range" min="0" max="1" step="0.01" id="f-opacity" value="${primaryMat.opacity}">
+        <span class="slider-val" id="opacity-val">${primaryMat.opacity.toFixed(2)}</span>
       </div>
 
       <div class="field-label">Roughness</div>
@@ -1475,15 +1788,36 @@ function refreshInspector() {
         <span class="slider-val" id="metal-val">${metal.toFixed(2)}</span>
       </div>
 
+      <div class="field-label">Emissive (Neon Glow)</div>
+      <div class="color-row" style="margin-bottom:6px;">
+        <input type="color" class="color-swatch-input" id="f-emissive-color" value="${emissiveHex}" title="Glow color">
+        <span style="font-size:11px; color:var(--text-2); flex:1;">Glow color — defaults to object color if left black</span>
+      </div>
+      <div class="slider-row">
+        <input type="range" min="0" max="4" step="0.05" id="f-emissive" value="${emissiveInt}">
+        <span class="slider-val" id="emissive-val">${emissiveInt.toFixed(2)}</span>
+      </div>
+
       <div class="field-label">Texture</div>
       <div class="color-row">
         <button class="btn" id="f-tex-upload" style="flex:1; justify-content:center;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-          ${o.mesh.material.map ? 'Replace image' : 'Upload image'}
+          ${matList.some(m=>m.map) ? 'Replace image' : 'Upload image'}
         </button>
-        ${o.mesh.material.map ? '<div class="del-btn" id="f-tex-clear" title="Remove texture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></div>' : ''}
+        ${(!Array.isArray(o.mesh.material) && primaryMat.map) ? '<div class="del-btn" id="f-tex-clear" title="Remove texture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></div>' : ''}
       </div>
       <input type="file" id="f-tex-input" accept="image/*" style="display:none">
+
+      <div class="field-label">Text on Face</div>
+      <button class="btn" id="f-text-face" style="width:100%; justify-content:center; margin-bottom:6px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+        ${o.faceLabels && Object.keys(o.faceLabels).length ? 'Edit face labels' : 'Add text to a face'}
+      </button>
+      ${o.faceLabels && Object.keys(o.faceLabels).length ? `
+        <div style="font-size:10.5px; color:var(--text-2); line-height:1.6;">
+          ${Object.entries(o.faceLabels).map(([f,label]) => `<div><b style="color:var(--text-1);">${FACE_LABEL[f]}:</b> ${label.text.length>24?label.text.slice(0,24)+'…':label.text}</div>`).join('')}
+        </div>
+      ` : ''}
     </div>
   `;
 
@@ -1536,7 +1870,7 @@ function refreshInspector() {
 
   function setColor(hexVal, mark) {
     if (mark) mark();
-    o.mesh.material.color.set(hexVal);
+    matList.forEach(m => m.color.set(hexVal));
     document.getElementById('f-color').value = hexVal;
     document.getElementById('f-hex').value = hexVal;
     refreshOutliner();
@@ -1557,10 +1891,12 @@ function refreshInspector() {
   opacityEl.addEventListener('input', (e) => {
     markOpacity();
     const v = parseFloat(e.target.value);
-    o.mesh.material.opacity = v;
-    o.mesh.material.transparent = v < 0.99;
-    o.mesh.material.depthWrite = v >= 0.99;
-    o.mesh.material.needsUpdate = true;
+    matList.forEach(m => {
+      m.opacity = v;
+      m.transparent = v < 0.99 || !!m.map;
+      m.depthWrite = v >= 0.99;
+      m.needsUpdate = true;
+    });
     document.getElementById('opacity-val').textContent = v.toFixed(2);
     refreshOutliner();
   });
@@ -1569,17 +1905,44 @@ function refreshInspector() {
   const markRough = withUndoOnce(roughEl);
   roughEl.addEventListener('input', (e) => {
     markRough();
-    o.mesh.material.roughness = parseFloat(e.target.value);
-    document.getElementById('rough-val').textContent = parseFloat(e.target.value).toFixed(2);
+    const v = parseFloat(e.target.value);
+    matList.forEach(m => { m.roughness = v; });
+    document.getElementById('rough-val').textContent = v.toFixed(2);
   });
   const metalEl = document.getElementById('f-metal');
   const markMetal = withUndoOnce(metalEl);
   metalEl.addEventListener('input', (e) => {
     markMetal();
-    o.mesh.material.metalness = parseFloat(e.target.value);
-    document.getElementById('metal-val').textContent = parseFloat(e.target.value).toFixed(2);
+    const v = parseFloat(e.target.value);
+    matList.forEach(m => { m.metalness = v; });
+    document.getElementById('metal-val').textContent = v.toFixed(2);
   });
 
+  // Emissive glow color defaults to the object's base color the first time intensity is
+  // raised above 0 from a black (unset) emissive, so "Add glow" doesn't require picking a
+  // color first — matches how most 3D tools default a fresh emissive channel.
+  const emissiveColorEl = document.getElementById('f-emissive-color');
+  const markEmissiveColor = withUndoOnce(emissiveColorEl);
+  emissiveColorEl.addEventListener('input', (e) => {
+    markEmissiveColor();
+    matList.forEach(m => { m.emissive.set(e.target.value); m.needsUpdate = true; });
+  });
+  const emissiveEl = document.getElementById('f-emissive');
+  const markEmissive = withUndoOnce(emissiveEl);
+  emissiveEl.addEventListener('input', (e) => {
+    markEmissive();
+    const v = parseFloat(e.target.value);
+    if (v > 0 && primaryMat.emissive.getHex() === 0x000000) {
+      matList.forEach(m => m.emissive.copy(m.color));
+      document.getElementById('f-emissive-color').value = '#' + primaryMat.color.getHexString();
+    }
+    matList.forEach(m => { m.emissiveIntensity = v; m.needsUpdate = true; });
+    document.getElementById('emissive-val').textContent = v.toFixed(2);
+  });
+
+  // Uploading a whole-object image applies it to every face material uniformly
+  // (overwriting any per-face text textures) — this is the "skin the whole object"
+  // path, distinct from the per-face "Text on Face" tool below.
   document.getElementById('f-tex-upload').addEventListener('click', () => document.getElementById('f-tex-input').click());
   document.getElementById('f-tex-input').addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -1594,8 +1957,13 @@ function refreshInspector() {
       new THREE.TextureLoader().load(dataUrl, (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
         pushUndo();
-        o.mesh.material.map = tex;
-        o.mesh.material.needsUpdate = true;
+        matList.forEach((m, i) => {
+          if (m.map) m.map.dispose();
+          m.map = i === 0 ? tex : tex.clone();
+          m.transparent = true;
+          m.needsUpdate = true;
+        });
+        o.faceLabels = null;
         refreshInspector();
       });
     };
@@ -1604,9 +1972,11 @@ function refreshInspector() {
   const clearBtn = document.getElementById('f-tex-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => {
     pushUndo();
-    if (o.mesh.material.map) { o.mesh.material.map.dispose(); o.mesh.material.map = null; o.mesh.material.needsUpdate = true; }
+    if (primaryMat.map) { primaryMat.map.dispose(); primaryMat.map = null; primaryMat.needsUpdate = true; }
     refreshInspector();
   });
+
+  document.getElementById('f-text-face').addEventListener('click', () => showTextFaceModal(o));
 }
 
 function updateInspectorTransform() {
@@ -1635,7 +2005,9 @@ document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
 });
 
 document.querySelectorAll('.prim-btn').forEach(btn => {
-  btn.addEventListener('click', () => { pushUndo(); addPrimitive(btn.dataset.prim); });
+  btn.addEventListener('click', () => {
+    pushUndo(); addPrimitive(btn.dataset.prim);
+  });
 });
 
 document.getElementById('btn-duplicate').addEventListener('click', duplicateSelected);
@@ -1892,6 +2264,380 @@ function addPrimitiveFromGeometry(geometry, opts, skipSelect=false) {
   return obj;
 }
 
+// ---------------- SETTINGS ----------------
+const settingsOverlay = document.getElementById('settings-overlay');
+document.getElementById('btn-settings').addEventListener('click', () => {
+  settingsOverlay.style.display = 'flex';
+});
+document.getElementById('settings-close').addEventListener('click', () => {
+  settingsOverlay.style.display = 'none';
+});
+settingsOverlay.addEventListener('click', (e) => {
+  if (e.target === settingsOverlay) settingsOverlay.style.display = 'none';
+});
+
+// Resize mode segmented control
+const resizeModeControl = document.getElementById('resize-mode-control');
+resizeModeControl.querySelectorAll('.seg-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    resizeModeControl.querySelectorAll('.seg-opt').forEach(o => o.classList.remove('active'));
+    opt.classList.add('active');
+    resizeMode = opt.dataset.value;
+    showToast(resizeMode === 'one-sided' ? 'Resize mode: One-Sided' : 'Resize mode: Symmetric');
+  });
+});
+
+// Neighbor-snap-during-resize toggle
+document.getElementById('resize-neighbor-snap-control').querySelectorAll('.seg-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('#resize-neighbor-snap-control .seg-opt').forEach(o => o.classList.remove('active'));
+    opt.classList.add('active');
+    resizeNeighborSnapEnabled = opt.dataset.value === 'on';
+    showToast(resizeNeighborSnapEnabled ? 'Snap-to-neighbor resize: On' : 'Snap-to-neighbor resize: Off');
+  });
+});
+
+// Theme segmented control
+const THEME_KEY = 'formwork3d-theme';
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+  try { localStorage.setItem(THEME_KEY, theme); } catch (err) { /* ignore storage errors */ }
+  document.querySelectorAll('#theme-control .seg-opt').forEach(o => {
+    o.classList.toggle('active', o.dataset.value === theme);
+  });
+}
+document.getElementById('theme-control').querySelectorAll('.seg-opt').forEach(opt => {
+  opt.addEventListener('click', () => applyTheme(opt.dataset.value));
+});
+(function initTheme() {
+  let saved = 'dark';
+  try { saved = localStorage.getItem(THEME_KEY) || 'dark'; } catch (err) { /* ignore */ }
+  applyTheme(saved);
+})();
+
+// ---------------- ADD TEXT / FACE TEXTURES ----------------
+// Faces are named by the direction their normal points, matching Blender/game-engine
+// convention: right(+X), left(-X), up(+Y), down(-Y), front(+Z), back(-Z).
+// BoxGeometry's material groups are laid out in a fixed order (right,left,up,down,front,back)
+// when materialIndex 0..5 is used per-group, so this order must match that layout exactly.
+const FACE_ORDER = ['right', 'left', 'up', 'down', 'front', 'back'];
+const FACE_LABEL = { right:'Right (+X)', left:'Left (-X)', up:'Up (+Y)', down:'Down (-Y)', front:'Front (+Z)', back:'Back (-Z)' };
+
+const TEXT_FONTS = [
+  { id: 'inter', label: 'Inter (Sans)', css: "'Inter', sans-serif" },
+  { id: 'mono', label: 'Mono', css: "'JetBrains Mono', 'SF Mono', Consolas, monospace" },
+  { id: 'serif', label: 'Serif', css: "Georgia, 'Times New Roman', serif" },
+  { id: 'condensed', label: 'Condensed', css: "'Arial Narrow', sans-serif" },
+  { id: 'cursive', label: 'Script', css: "'Brush Script MT', cursive" }
+];
+function fontCss(fontId) {
+  return (TEXT_FONTS.find(f => f.id === fontId) || TEXT_FONTS[0]).css;
+}
+
+// Renders `text` into a square canvas and returns a ready-to-use CanvasTexture.
+// The background is always filled with `bg` (defaulting to solid white) rather than
+// left transparent — a transparent map with depthWrite still on renders as a punched-
+// through hole showing whatever is behind the mesh, which read as "the face went
+// invisible." A solid backing color keeps the face opaque while a different color can
+// still be typed in to match/contrast the object.
+function renderTextTexture(text, opts = {}) {
+  const size = opts.size || 512;
+  const fontSize = opts.fontSize || 72;
+  const bg = opts.bg || '#ffffff';
+  const fg = opts.color || '#000000';
+  const fontFamily = fontCss(opts.font);
+  const cnv = document.createElement('canvas');
+  cnv.width = size; cnv.height = size;
+  const ctx = cnv.getContext('2d');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, size, size);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = fg;
+
+  // Word-wrap to fit within the canvas with padding, shrinking the font if needed,
+  // so arbitrary label lengths never clip or overflow off the texture.
+  const padding = size * 0.1;
+  const maxWidth = size - padding * 2;
+  let fs = fontSize;
+  let lines;
+  while (true) {
+    ctx.font = `bold ${fs}px ${fontFamily}`;
+    const words = text.split(/\s+/).filter(Boolean);
+    lines = [];
+    let cur = '';
+    words.forEach(w => {
+      const test = cur ? `${cur} ${w}` : w;
+      if (ctx.measureText(test).width > maxWidth && cur) {
+        lines.push(cur);
+        cur = w;
+      } else {
+        cur = test;
+      }
+    });
+    if (cur) lines.push(cur);
+    if (lines.length === 0) lines = [''];
+    const lineHeight = fs * 1.25;
+    const totalHeight = lineHeight * lines.length;
+    const widest = Math.max(...lines.map(l => ctx.measureText(l).width));
+    if ((totalHeight <= size - padding * 2 && widest <= maxWidth) || fs <= 14) break;
+    fs -= 4;
+  }
+  ctx.font = `bold ${fs}px ${fontFamily}`;
+  const lineHeight = fs * 1.25;
+  const startY = size / 2 - (lineHeight * (lines.length - 1)) / 2;
+  lines.forEach((line, i) => ctx.fillText(line, size / 2, startY + i * lineHeight));
+
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// Converts a mesh's material from a single MeshStandardMaterial into a 6-entry array
+// (one per BoxGeometry face group) so each face can carry its own texture independently.
+// A fresh BoxGeometry ships with one group covering all faces, so it is re-grouped into
+// the 6 standard box groups first. Existing color/roughness/metalness/emissive/opacity
+// are copied onto every face's material so nothing changes visually until a face
+// texture is actually applied.
+function ensureFaceMaterials(obj) {
+  const mesh = obj.mesh;
+  if (Array.isArray(mesh.material)) return mesh.material;
+
+  const src = mesh.material;
+  const base = {
+    color: src.color.clone(),
+    roughness: src.roughness,
+    metalness: src.metalness,
+    opacity: src.opacity,
+    transparent: src.transparent,
+    depthWrite: src.depthWrite,
+    emissive: src.emissive.clone(),
+    emissiveIntensity: src.emissiveIntensity,
+    side: src.side
+  };
+  const mats = FACE_ORDER.map(() => new THREE.MeshStandardMaterial({ ...base, color: base.color.clone(), emissive: base.emissive.clone() }));
+
+  const geo = mesh.geometry;
+  geo.clearGroups();
+  const posCount = geo.attributes.position.count;
+  const triCount = geo.index ? geo.index.count / 3 : posCount / 3;
+  if (triCount === 12) {
+    // Standard BoxGeometry: 6 faces * 2 triangles * 3 indices, in right/left/up/down/front/back order.
+    for (let f = 0; f < 6; f++) {
+      geo.addGroup(f * 6, 6, f);
+    }
+  } else {
+    // Non-standard box (e.g. edited in Edit Mode): fall back to one group covering
+    // everything on materialIndex 0, so it still renders — face-specific texturing
+    // on a topologically-modified box is not guaranteed to hit the intended face.
+    geo.addGroup(0, geo.index ? geo.index.count : posCount, 0);
+  }
+
+  mesh.material = mats;
+  if (src.map) mats.forEach(m => { m.map = src.map; m.needsUpdate = true; });
+  src.dispose();
+  return mats;
+}
+
+// Applies `tex` to a single named face. The face material is switched to fully opaque
+// (transparent:false, depthWrite:true) since the texture itself is now a solid, fully-
+// painted image — no alpha channel left to blend, so there's no reason to pay for
+// transparent sorting/blending, and it avoids the invisible-face bug transparent
+// backgrounds used to cause. On box-like meshes (6 material groups) this targets
+// exactly that face. On everything else (sphere/cylinder/cone/torus/plane/imported)
+// there is no discrete flat face to target, so the texture goes on a single
+// double-sided material regardless of which face label was picked.
+function applyFaceTexture(obj, face, tex) {
+  const mesh = obj.mesh;
+  if (obj.type === 'box') {
+    const mats = ensureFaceMaterials(obj);
+    const idx = FACE_ORDER.indexOf(face);
+    if (idx === -1) return;
+    if (mats[idx].map) mats[idx].map.dispose();
+    mats[idx].map = tex;
+    mats[idx].transparent = false;
+    mats[idx].depthWrite = true;
+    mats[idx].needsUpdate = true;
+  } else {
+    const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    if (mat.map) mat.map.dispose();
+    mat.map = tex;
+    mat.side = THREE.DoubleSide;
+    mat.transparent = false;
+    mat.depthWrite = true;
+    mat.needsUpdate = true;
+  }
+}
+
+// Removes a face's text texture and reverts that face's material back to a plain
+// colored surface (the object's own base color), and drops its entry from faceLabels.
+function removeFaceTexture(obj, face) {
+  const mesh = obj.mesh;
+  if (obj.type === 'box' && Array.isArray(mesh.material)) {
+    const idx = FACE_ORDER.indexOf(face);
+    if (idx === -1) return;
+    const mat = mesh.material[idx];
+    if (mat.map) { mat.map.dispose(); mat.map = null; }
+    mat.transparent = mat.opacity < 0.99;
+    mat.depthWrite = mat.opacity >= 0.99;
+    mat.needsUpdate = true;
+  } else {
+    const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    if (mat.map) { mat.map.dispose(); mat.map = null; }
+    mat.transparent = mat.opacity < 0.99;
+    mat.depthWrite = mat.opacity >= 0.99;
+    mat.needsUpdate = true;
+  }
+  if (obj.faceLabels) {
+    delete obj.faceLabels[face];
+    if (Object.keys(obj.faceLabels).length === 0) obj.faceLabels = null;
+  }
+}
+
+// Opens the face-texture builder: a textbox for the label plus a 6-way face picker,
+// applied to the currently selected mesh. If nothing is selected, adds a fresh box
+// first so there is always something to texture.
+function openTextFaceTool() {
+  let target = selected;
+  if (!target) {
+    addPrimitive('box', {}, true);
+    target = objects[objects.length - 1];
+  }
+  showTextFaceModal(target);
+}
+
+function showTextFaceModal(obj) {
+  const existing = document.getElementById('text-face-modal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'text-face-modal';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200;';
+
+  let chosenFace = FACE_ORDER.find(f => obj.faceLabels && obj.faceLabels[f]) || 'front';
+  const existingLabel = (obj.faceLabels && obj.faceLabels[chosenFace]) || null;
+
+  overlay.innerHTML = `
+    <div class="modal" style="width:340px; background:var(--bg-1); border:1px solid var(--line); border-radius:12px; padding:20px;">
+      <h3 style="font-size:15px; margin-bottom:4px;">Text on Face</h3>
+      <p style="font-size:12px; color:var(--text-1); margin-bottom:14px; line-height:1.5;">Applies to <b style="color:var(--text-0)">${obj.name}</b>${obj.type !== 'box' ? ' — non-box meshes only support one texture, applied double-sided regardless of face chosen below.' : ''}</p>
+
+      <div class="field-label" style="margin-bottom:6px;">Face</div>
+      <div id="tf-face-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:14px;"></div>
+
+      <div class="field-label" style="margin-bottom:6px;">Label text</div>
+      <textarea id="tf-text" rows="3" style="width:100%; resize:vertical; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; padding:8px 9px; color:var(--text-0); font-family:var(--font-ui); font-size:12.5px; margin-bottom:14px;" placeholder="Enter label text&hellip;"></textarea>
+
+      <div class="field-label" style="margin-bottom:6px;">Font</div>
+      <select id="tf-font" style="width:100%; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; padding:7px 9px; color:var(--text-0); font-family:var(--font-ui); font-size:12.5px; margin-bottom:14px;">
+        ${TEXT_FONTS.map(f => `<option value="${f.id}">${f.label}</option>`).join('')}
+      </select>
+
+      <div class="field-label" style="margin-bottom:6px;">Text color</div>
+      <div class="color-row" style="margin-bottom:10px;">
+        <input type="color" class="color-swatch-input" id="tf-fg" value="#000000">
+        <span style="font-size:11px; color:var(--text-2); flex:1;">Color of the letters</span>
+      </div>
+      <div class="field-label" style="margin-bottom:6px;">Background color</div>
+      <div class="color-row" style="margin-bottom:16px;">
+        <input type="color" class="color-swatch-input" id="tf-bg" value="#ffffff">
+        <span style="font-size:11px; color:var(--text-2); flex:1;">Color behind the letters</span>
+      </div>
+
+      <div style="display:flex; gap:8px; justify-content:space-between;">
+        <button class="btn" id="tf-remove" style="${existingLabel ? '' : 'display:none;'} color:var(--red);">Remove text</button>
+        <div style="display:flex; gap:8px; margin-left:auto;">
+          <button class="btn" id="tf-cancel">Cancel</button>
+          <button class="btn primary" id="tf-apply">Apply</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const textEl = document.getElementById('tf-text');
+  const fontEl = document.getElementById('tf-font');
+  const fgEl = document.getElementById('tf-fg');
+  const bgEl = document.getElementById('tf-bg');
+  const removeBtn = document.getElementById('tf-remove');
+
+  function loadFaceIntoForm(face) {
+    const label = obj.faceLabels && obj.faceLabels[face];
+    textEl.value = label ? label.text : '';
+    fontEl.value = (label && label.font) || 'inter';
+    fgEl.value = (label && label.color) || '#000000';
+    bgEl.value = (label && label.bg) || '#ffffff';
+    removeBtn.style.display = label ? '' : 'none';
+  }
+  loadFaceIntoForm(chosenFace);
+
+  const grid = document.getElementById('tf-face-grid');
+  FACE_ORDER.forEach(face => {
+    const b = document.createElement('div');
+    b.className = 'seg-opt';
+    b.dataset.face = face;
+    const hasLabel = obj.faceLabels && obj.faceLabels[face];
+    b.style.cssText = 'padding:8px 6px; text-align:center; border:1px solid var(--line); border-radius:6px; cursor:pointer; font-size:11px; font-weight:600; color:var(--text-1); position:relative;';
+    b.textContent = FACE_LABEL[face];
+    if (hasLabel) {
+      const dot = document.createElement('span');
+      dot.style.cssText = 'position:absolute; top:4px; right:4px; width:5px; height:5px; border-radius:50%; background:var(--accent);';
+      b.appendChild(dot);
+    }
+    b.addEventListener('click', () => {
+      chosenFace = face;
+      loadFaceIntoForm(face);
+      grid.querySelectorAll('.seg-opt').forEach(el => {
+        const active = el.dataset.face === face;
+        el.style.background = active ? 'var(--accent-dim)' : 'transparent';
+        el.style.color = active ? 'var(--accent)' : 'var(--text-1)';
+        el.style.borderColor = active ? 'rgba(255,138,61,0.5)' : 'var(--line)';
+      });
+    });
+    grid.appendChild(b);
+  });
+  grid.querySelector(`[data-face="${chosenFace}"]`).dispatchEvent(new Event('click'));
+
+  const closeModal = () => overlay.remove();
+  document.getElementById('tf-cancel').addEventListener('click', closeModal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+  removeBtn.addEventListener('click', () => {
+    pushUndo();
+    removeFaceTexture(obj, chosenFace);
+    selectObject(obj);
+    refreshOutliner();
+    refreshInspector();
+    refreshEmptyState();
+    showToast(`Removed text from ${FACE_LABEL[chosenFace]} of ${obj.name}`);
+    closeModal();
+  });
+
+  document.getElementById('tf-apply').addEventListener('click', () => {
+    const text = textEl.value.trim();
+    if (!text) { showToast('Enter some text first', true); return; }
+    const font = fontEl.value;
+    const color = fgEl.value;
+    const bg = bgEl.value;
+    const tex = renderTextTexture(text, { font, color, bg });
+    pushUndo();
+    applyFaceTexture(obj, chosenFace, tex);
+    if (!obj.faceLabels) obj.faceLabels = {};
+    obj.faceLabels[chosenFace] = { text, font, color, bg };
+    selectObject(obj);
+    refreshOutliner();
+    refreshInspector();
+    refreshEmptyState();
+    showToast(`Applied "${text}" to ${FACE_LABEL[chosenFace]} of ${obj.name}`);
+    closeModal();
+  });
+}
+
+function addTextMesh() {
+  openTextFaceTool();
+}
+
 // ---------------- EXPORT ----------------
 const exportOverlay = document.getElementById('export-overlay');
 document.getElementById('btn-export').addEventListener('click', () => {
@@ -1915,8 +2661,10 @@ function doExport(format) {
   const exportScene = new THREE.Scene();
   objects.forEach(o => {
     const clone = o.mesh.clone();
-    clone.material = o.mesh.material.clone();
-    clone.material.emissive.set(0x000000);
+    // GLTFExporter understands a material array directly (it maps geometry groups
+    // to glTF primitives, one per material) — clone each face material independently
+    // so the exported file keeps distinct per-face textures.
+    clone.material = Array.isArray(o.mesh.material) ? o.mesh.material.map(m => m.clone()) : o.mesh.material.clone();
     clone.name = o.name;
     exportScene.add(clone);
   });
@@ -2136,6 +2884,12 @@ function enterEditMode() {
     mesh.geometry.dispose();
     mesh.geometry = nonIndexed;
   }
+  // NOTE: extrude/loop-cut (below) rebuild geometry from scratch and drop material
+  // groups, so a per-face-textured box loses its face->material mapping once its
+  // topology is edited — it keeps rendering (falls back to materialIndex 0 / the
+  // first face's texture) rather than crashing, but face assignment is no longer
+  // guaranteed after topology edits. This mirrors the pre-existing behavior for
+  // any mesh's UVs after topology edits, so it isn't a new class of fragility.
 
   transformControls.detach();
   orbit.enabled = true;
@@ -2762,6 +3516,7 @@ window.addEventListener('resize', onResize);
 function animate() {
   requestAnimationFrame(animate);
   orbit.update();
+  selectionOutlines.forEach(helper => helper.update());
   renderer.render(scene, camera);
 }
 animate();
