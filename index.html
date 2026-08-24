@@ -699,6 +699,17 @@
 
     <div class="setting-row">
       <div class="setting-label">
+        <span class="st-name">Image texture mode</span>
+        <span class="st-desc">Normal stretches an uploaded image to fill the face, which can distort it on non-square faces. Tile repeats the image at its own aspect ratio instead, so it never stretches. Text on faces is unaffected — it's never stretched or tiled.</span>
+      </div>
+      <div class="seg-control" id="texture-mode-control">
+        <div class="seg-opt active" data-value="normal">Normal</div>
+        <div class="seg-opt" data-value="tile">Tile</div>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
         <span class="st-name">Snap-to-neighbor while resizing</span>
         <span class="st-desc">When on and "Snap to grid" (bottom bar) is enabled, resizing an object near another one will pull the growing edge flush against it. This is what causes an object to shift position mid-resize. Turn off if that movement is unwanted.</span>
       </div>
@@ -893,9 +904,10 @@ transformControls.addEventListener('dragging-changed', (e) => {
   }
 });
 
-// Applies the one-sided compensation: for each axis whose scale changed this tick, figure out
-// which face moved (the one that grew away from the anchor) and translate the mesh so the
-// OTHER face returns to where it was before this tick, then updates the tracked prev box/scale.
+// Applies the one-sided compensation: for each axis whose scale changed this tick, pin the
+// face OPPOSITE the handle the user actually grabbed (dragging the +X/right handle grows from
+// the right and keeps the left face fixed; dragging -X/left grows from the left and keeps the
+// right face fixed — same idea for Y/up-down and Z/front-back).
 function applyOneSidedResize(target) {
   if (resizeMode !== 'one-sided' || !oneSidedPrevBox || !oneSidedPrevScale) return;
   if (!oneSidedPinFace) oneSidedPinFace = {};
@@ -903,17 +915,25 @@ function applyOneSidedResize(target) {
   ['x','y','z'].forEach(axis => {
     const scaleChanged = Math.abs(target.scale[axis] - oneSidedPrevScale[axis]) > 1e-9;
     if (!scaleChanged) return;
-    // Decide which face is being dragged ONCE per drag (on the first tick that this axis's
-    // scale actually changes), then keep pinning that same face for the rest of the drag.
-    // Re-deciding every tick from the current growMax/growMin comparison is what caused the
-    // jump: once the dragged face's growth shrinks toward zero (e.g. near the far end of a
-    // handle drag, or from float noise), the comparison can flip which face is "moving",
-    // and the code would suddenly start pinning the opposite face instead — snapping the
-    // mesh sideways.
+    // Decide which face is being dragged ONCE per drag. Prefer the actual gizmo handle
+    // (transformControls.axis, e.g. "X" vs "-X") so the pinned face matches the handle the
+    // user grabbed rather than being inferred from box deltas — the old inference could pick
+    // the wrong face once growth on the dragged side shrank toward zero mid-drag (e.g. near
+    // the far end of a handle drag, or from float noise), causing a sideways jump.
     if (!oneSidedPinFace[axis]) {
-      const growMax = newBox.max[axis] - oneSidedPrevBox.max[axis];
-      const growMin = oneSidedPrevBox.min[axis] - newBox.min[axis];
-      oneSidedPinFace[axis] = Math.abs(growMax) >= Math.abs(growMin) ? 'min' : 'max';
+      const gizmoAxis = transformControls.axis; // e.g. 'X', '-X', 'Y', '-Y', 'Z', '-Z', or combined like 'XY'
+      const axisLetter = axis.toUpperCase();
+      if (gizmoAxis && gizmoAxis.toUpperCase().includes(axisLetter)) {
+        // Negative handle (e.g. "-X") drags the min face outward -> pin max. Positive handle
+        // (e.g. "X") drags the max face outward -> pin min.
+        oneSidedPinFace[axis] = gizmoAxis.includes('-') ? 'max' : 'min';
+      } else {
+        // Fallback for cases where the gizmo axis isn't available (e.g. programmatic scale,
+        // or a combined-plane/uniform handle): infer from which face actually moved this tick.
+        const growMax = newBox.max[axis] - oneSidedPrevBox.max[axis];
+        const growMin = oneSidedPrevBox.min[axis] - newBox.min[axis];
+        oneSidedPinFace[axis] = Math.abs(growMax) >= Math.abs(growMin) ? 'min' : 'max';
+      }
     }
     if (oneSidedPinFace[axis] === 'min') {
       // pin min face: shift so new min == old min
@@ -938,6 +958,7 @@ let idCounter = 1;
 let snapEnabled = false;
 let resizeMode = 'symmetric'; // 'symmetric' | 'one-sided'
 let resizeNeighborSnapEnabled = true; // whether scaling near another object snaps flush against it
+let textureMode = 'normal'; // 'normal' (stretch to fill face) | 'tile' (repeat at native aspect, never stretched)
 const undoStack = [];
 const redoStack = [];
 
@@ -1131,9 +1152,16 @@ function restoreScene(snap) {
       primaryMat = mats[0];
       s.faceMaterials.forEach((fm, i) => {
         if (!fm.mapImg) return;
+        const faceName = FACE_ORDER[i];
+        const isText = !!(s.faceLabels && s.faceLabels[faceName]);
         new THREE.TextureLoader().load(
           fm.mapImg,
-          (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mats[i].map = tex; mats[i].needsUpdate = true; },
+          (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.isTextTexture = isText;
+            if (!isText) applyTextureModeToTexture(tex, faceWorldSize({ mesh }, faceName));
+            mats[i].map = tex; mats[i].needsUpdate = true;
+          },
           undefined,
           () => console.warn(`Face texture for "${s.name}" (${FACE_ORDER[i]}) could not be loaded`)
         );
@@ -1151,7 +1179,13 @@ function restoreScene(snap) {
         // leaving the user wondering why nothing loaded.
         new THREE.TextureLoader().load(
           s.mapImg,
-          (tex) => { tex.colorSpace = THREE.SRGBColorSpace; mat.map = tex; mat.needsUpdate = true; },
+          (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            const box = new THREE.Box3().setFromObject(mesh);
+            const size = box.getSize(new THREE.Vector3());
+            applyTextureModeToTexture(tex, { w: size.x || 1, h: size.y || 1 });
+            mat.map = tex; mat.needsUpdate = true;
+          },
           undefined,
           () => console.warn(`Texture for "${s.name}" could not be loaded (stale blob: URL from an older save?)`)
         );
@@ -1957,9 +1991,13 @@ function refreshInspector() {
       new THREE.TextureLoader().load(dataUrl, (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
         pushUndo();
+        const box = new THREE.Box3().setFromObject(o.mesh);
+        const size = box.getSize(new THREE.Vector3());
         matList.forEach((m, i) => {
           if (m.map) m.map.dispose();
-          m.map = i === 0 ? tex : tex.clone();
+          const t = i === 0 ? tex : tex.clone();
+          applyTextureModeToTexture(t, { w: size.x || 1, h: size.y || 1 });
+          m.map = t;
           m.transparent = true;
           m.needsUpdate = true;
         });
@@ -2079,6 +2117,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'w' || e.key === 'W') setTool('translate');
   if (e.key === 'e' || e.key === 'E') setTool('rotate');
   if (e.key === 'r' || e.key === 'R') setTool('scale');
+  if (e.key === 'o' || e.key === 'O') { e.preventDefault(); setResizeMode('one-sided'); }
+  if (e.key === 'p' || e.key === 'P') { e.preventDefault(); setResizeMode('symmetric'); }
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); }
   if (e.key === 'a' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); setSelection([...objects]); }
   if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !e.shiftKey) { e.preventDefault(); doUndo(); }
@@ -2278,13 +2318,13 @@ settingsOverlay.addEventListener('click', (e) => {
 
 // Resize mode segmented control
 const resizeModeControl = document.getElementById('resize-mode-control');
+function setResizeMode(mode) {
+  resizeMode = mode;
+  resizeModeControl.querySelectorAll('.seg-opt').forEach(o => o.classList.toggle('active', o.dataset.value === mode));
+  showToast(resizeMode === 'one-sided' ? 'Resize mode: One-Sided' : 'Resize mode: Symmetric');
+}
 resizeModeControl.querySelectorAll('.seg-opt').forEach(opt => {
-  opt.addEventListener('click', () => {
-    resizeModeControl.querySelectorAll('.seg-opt').forEach(o => o.classList.remove('active'));
-    opt.classList.add('active');
-    resizeMode = opt.dataset.value;
-    showToast(resizeMode === 'one-sided' ? 'Resize mode: One-Sided' : 'Resize mode: Symmetric');
-  });
+  opt.addEventListener('click', () => setResizeMode(opt.dataset.value));
 });
 
 // Neighbor-snap-during-resize toggle
@@ -2296,6 +2336,81 @@ document.getElementById('resize-neighbor-snap-control').querySelectorAll('.seg-o
     showToast(resizeNeighborSnapEnabled ? 'Snap-to-neighbor resize: On' : 'Snap-to-neighbor resize: Off');
   });
 });
+
+// Image texture mode: Normal (stretch to fill) vs Tile (repeat at native aspect, never stretched).
+// Only affects image textures (whole-object upload and face image upload) — text-on-face textures
+// are rendered at the face's own aspect ratio in renderTextTexture, so they're excluded on purpose.
+const textureModeControl = document.getElementById('texture-mode-control');
+textureModeControl.querySelectorAll('.seg-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    textureModeControl.querySelectorAll('.seg-opt').forEach(o => o.classList.remove('active'));
+    opt.classList.add('active');
+    textureMode = opt.dataset.value;
+    reapplyTextureModeToAllImageTextures();
+    showToast(textureMode === 'tile' ? 'Image texture mode: Tile' : 'Image texture mode: Normal');
+  });
+});
+
+// Returns the world-space width/height of a face for a given box-like object, used to compute
+// tiling repeat counts and aspect. Falls back to the object's overall footprint for non-box types
+// (sphere/cylinder/etc. don't have discrete rectangular faces, so exact tiling isn't meaningful,
+// but this keeps the aspect ratio reasonable rather than always assuming a square).
+function faceWorldSize(obj, face) {
+  const s = obj.mesh.scale;
+  switch (face) {
+    case 'right': case 'left': return { w: Math.abs(s.z), h: Math.abs(s.y) };
+    case 'up': case 'down': return { w: Math.abs(s.x), h: Math.abs(s.z) };
+    case 'front': case 'back': return { w: Math.abs(s.x), h: Math.abs(s.y) };
+    default: return { w: Math.abs(s.x) || 1, h: Math.abs(s.y) || 1 };
+  }
+}
+
+// Applies the current global texture mode to one image texture. In Tile mode the texture repeats
+// at its own native pixel aspect ratio in BOTH directions — the tile is sized to fit within the
+// face without ever being stretched (by the shorter of "fit by width" or "fit by height"), then
+// repeated as many times as needed to cover the rest of the face. In Normal mode it stretches to
+// fill (repeat reset to 1,1), matching the old default behavior.
+function applyTextureModeToTexture(tex, faceSize) {
+  if (!tex) return;
+  if (textureMode === 'tile' && tex.image && tex.image.width && tex.image.height && faceSize && faceSize.w > 1e-6 && faceSize.h > 1e-6) {
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    const texAspect = tex.image.width / tex.image.height; // width/height of the source image
+    // Fit one tile at its true aspect ratio inside the face — try filling the full face width
+    // first; if that would make the tile taller than the face, fit by height instead. Either
+    // way the tile's own w:h ratio is preserved, so it's never stretched.
+    let tileW = faceSize.w;
+    let tileH = tileW / texAspect;
+    if (tileH > faceSize.h) {
+      tileH = faceSize.h;
+      tileW = tileH * texAspect;
+    }
+    tex.repeat.set(faceSize.w / tileW, faceSize.h / tileH);
+    tex.needsUpdate = true;
+  } else {
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.repeat.set(1, 1);
+    tex.needsUpdate = true;
+  }
+}
+
+// Re-applies the current texture mode to every image texture currently in the scene (whole-object
+// skins and per-face image textures). Called whenever the global Tile/Normal setting changes.
+function reapplyTextureModeToAllImageTextures() {
+  objects.forEach(obj => {
+    const mats = Array.isArray(obj.mesh.material) ? obj.mesh.material : [obj.mesh.material];
+    mats.forEach((m, i) => {
+      if (!m.map || m.map.isTextTexture) return;
+      const face = Array.isArray(obj.mesh.material) ? FACE_ORDER[i] : null;
+      applyTextureModeToTexture(m.map, face ? faceWorldSize(obj, face) : (() => {
+        const box = new THREE.Box3().setFromObject(obj.mesh);
+        const size = box.getSize(new THREE.Vector3());
+        return { w: size.x || 1, h: size.y || 1 };
+      })());
+    });
+  });
+}
 
 // Theme segmented control
 const THEME_KEY = 'formwork3d-theme';
@@ -2390,6 +2505,9 @@ function renderTextTexture(text, opts = {}) {
 
   const tex = new THREE.CanvasTexture(cnv);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.isTextTexture = true; // excluded from the global Tile/Normal image-texture setting — text is
+                             // rendered at the face's own square aspect and must never be tiled or
+                             // stretched, so it stays fixed regardless of that setting.
   tex.needsUpdate = true;
   return tex;
 }
@@ -2534,6 +2652,12 @@ function showTextFaceModal(obj) {
         ${TEXT_FONTS.map(f => `<option value="${f.id}">${f.label}</option>`).join('')}
       </select>
 
+      <div class="field-label" style="margin-bottom:6px; display:flex; justify-content:space-between;">
+        <span>Text size</span>
+        <span id="tf-size-val" style="color:var(--text-2); font-family:var(--font-mono);"></span>
+      </div>
+      <input type="range" id="tf-size" min="24" max="160" step="4" style="width:100%; margin-bottom:14px;">
+
       <div class="field-label" style="margin-bottom:6px;">Text color</div>
       <div class="color-row" style="margin-bottom:10px;">
         <input type="color" class="color-swatch-input" id="tf-fg" value="#000000">
@@ -2558,14 +2682,20 @@ function showTextFaceModal(obj) {
 
   const textEl = document.getElementById('tf-text');
   const fontEl = document.getElementById('tf-font');
+  const sizeEl = document.getElementById('tf-size');
+  const sizeValEl = document.getElementById('tf-size-val');
   const fgEl = document.getElementById('tf-fg');
   const bgEl = document.getElementById('tf-bg');
   const removeBtn = document.getElementById('tf-remove');
+
+  sizeEl.addEventListener('input', () => { sizeValEl.textContent = sizeEl.value; });
 
   function loadFaceIntoForm(face) {
     const label = obj.faceLabels && obj.faceLabels[face];
     textEl.value = label ? label.text : '';
     fontEl.value = (label && label.font) || 'inter';
+    sizeEl.value = (label && label.fontSize) || 72;
+    sizeValEl.textContent = sizeEl.value;
     fgEl.value = (label && label.color) || '#000000';
     bgEl.value = (label && label.bg) || '#ffffff';
     removeBtn.style.display = label ? '' : 'none';
@@ -2618,13 +2748,14 @@ function showTextFaceModal(obj) {
     const text = textEl.value.trim();
     if (!text) { showToast('Enter some text first', true); return; }
     const font = fontEl.value;
+    const fontSize = parseInt(sizeEl.value, 10);
     const color = fgEl.value;
     const bg = bgEl.value;
-    const tex = renderTextTexture(text, { font, color, bg });
+    const tex = renderTextTexture(text, { font, color, bg, fontSize });
     pushUndo();
     applyFaceTexture(obj, chosenFace, tex);
     if (!obj.faceLabels) obj.faceLabels = {};
-    obj.faceLabels[chosenFace] = { text, font, color, bg };
+    obj.faceLabels[chosenFace] = { text, font, color, bg, fontSize };
     selectObject(obj);
     refreshOutliner();
     refreshInspector();
