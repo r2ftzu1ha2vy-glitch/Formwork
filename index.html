@@ -924,11 +924,9 @@ function applyOneSidedResize(target) {
       const gizmoAxis = transformControls.axis; // e.g. 'X', '-X', 'Y', '-Y', 'Z', '-Z', or combined like 'XY'
       const axisLetter = axis.toUpperCase();
       if (gizmoAxis && gizmoAxis.toUpperCase().includes(axisLetter)) {
-        // Negative handle (e.g. "-X") drags the min face outward -> pin min stays fixed... no:
-        // the handle you grab is the face that MOVES, so the OPPOSITE face is what gets pinned.
-        // Negative handle ("-X"/"-Z"/etc.) grabs and moves the min face -> pin the max face.
-        // Positive handle ("X"/"Z"/etc.) grabs and moves the max face -> pin the min face.
-        oneSidedPinFace[axis] = gizmoAxis.includes('-') ? 'min' : 'max';
+        // Negative handle (e.g. "-X") drags the min face outward -> pin max. Positive handle
+        // (e.g. "X") drags the max face outward -> pin min.
+        oneSidedPinFace[axis] = gizmoAxis.includes('-') ? 'max' : 'min';
       } else {
         // Fallback for cases where the gizmo axis isn't available (e.g. programmatic scale,
         // or a combined-plane/uniform handle): infer from which face actually moved this tick.
@@ -1516,9 +1514,7 @@ function attachGizmoToSelection() {
     multiProxy.scale.set(1,1,1);
     proxyChildOffsets = selObjs.map(o => ({
       obj: o,
-      relPos: o.mesh.position.clone().sub(center),
-      relQuat: o.mesh.quaternion.clone(),
-      relScale: o.mesh.scale.clone()
+      relPos: o.mesh.position.clone().sub(center)
     }));
     transformControls.attach(multiProxy);
   }
@@ -1598,23 +1594,14 @@ function applyResizeEdgeSnap(obj) {
   resizeSnapPrevBox = new THREE.Box3().setFromObject(obj.mesh);
 }
 
-// When dragging the proxy, propagate to real objects. Multi-select drag on the proxy means
-// "transform this whole model as one unit" — so rotate/scale need to apply to each child's own
-// rotation/scale too, not just spread their positions apart, or the group would only look like
-// it moved further apart on rotate/scale while each individual piece stayed its original size
-// and orientation.
+// When dragging the proxy, propagate to real objects
 transformControls.addEventListener('objectChange', () => {
   const target = transformControls.object;
 
   if (target === multiProxy && proxyChildOffsets.length) {
-    proxyChildOffsets.forEach(({obj, relPos, relQuat, relScale}) => {
+    proxyChildOffsets.forEach(({obj, relPos}) => {
       const rotatedOffset = relPos.clone().applyEuler(multiProxy.rotation).multiply(multiProxy.scale);
       obj.mesh.position.copy(multiProxy.position).add(rotatedOffset);
-      // Fold the proxy's rotation onto each child's own orientation, and the proxy's scale
-      // onto each child's own scale, so scaling/rotating a multi-selection resizes/rotates
-      // every part in place (shrinking each one) instead of only spreading them apart.
-      obj.mesh.quaternion.copy(multiProxy.quaternion).multiply(relQuat);
-      obj.mesh.scale.set(relScale.x * multiProxy.scale.x, relScale.y * multiProxy.scale.y, relScale.z * multiProxy.scale.z);
     });
   }
 
@@ -3657,173 +3644,10 @@ function onResize() {
 }
 window.addEventListener('resize', onResize);
 
-// ---------------- ONE-SIDED RESIZE: 6 per-face drag handles ----------------
-// Replaces relying on TransformControls' 3-axis scale gizmo for one-sided mode. That gizmo
-// only exposes 3 rods (X/Y/Z), each shared by both the + and - ends of an axis, and figuring
-// out which end the user actually grabbed (transformControls.axis / box-delta inference) kept
-// getting the direction backwards in different situations. Six independent handles — one
-// stationed at each face's center — removes the ambiguity entirely: each handle only ever
-// drags its own face, and the opposite face is always the one kept fixed.
-const FACE_HANDLE_DEFS = [
-  { face: 'right', axis: 'x', sign: +1, color: 0xe8636b },
-  { face: 'left',  axis: 'x', sign: -1, color: 0xe8636b },
-  { face: 'up',    axis: 'y', sign: +1, color: 0x5ec98f },
-  { face: 'down',  axis: 'y', sign: -1, color: 0x5ec98f },
-  { face: 'front', axis: 'z', sign: +1, color: 0x5b9dd9 },
-  { face: 'back',  axis: 'z', sign: -1, color: 0x5b9dd9 },
-];
-const faceHandleGroup = new THREE.Group();
-faceHandleGroup.visible = false;
-scene.add(faceHandleGroup);
-const faceHandleMeshes = FACE_HANDLE_DEFS.map(def => {
-  const geo = new THREE.SphereGeometry(0.09, 16, 16);
-  const mat = new THREE.MeshBasicMaterial({ color: def.color, depthTest: false, transparent: true, opacity: 0.95 });
-  const m = new THREE.Mesh(geo, mat);
-  m.renderOrder = 998;
-  m.userData.faceDef = def;
-  faceHandleGroup.add(m);
-  return m;
-});
-
-// Positions the 6 handles at the center of each face of the currently-selected mesh, just
-// outside the surface so they're easy to grab without z-fighting into the mesh itself.
-function updateFaceHandlePositions() {
-  if (!faceHandleGroup.visible) return;
-  const mesh = transformControls.object;
-  if (!mesh || mesh === multiProxy || (typeof editPivot !== 'undefined' && mesh === editPivot)) { faceHandleGroup.visible = false; return; }
-  const box = new THREE.Box3().setFromObject(mesh);
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const pad = 0.06;
-  faceHandleMeshes.forEach(m => {
-    const { axis, sign } = m.userData.faceDef;
-    const p = center.clone();
-    p[axis] += sign * (size[axis] / 2 + pad);
-    m.position.copy(p);
-  });
-}
-
-// Shows/hides the 6 handles based on current tool + resize mode + selection, called from the
-// same places that already drive gizmo visibility (setTool, setResizeMode, selection changes).
-function refreshFaceHandleVisibility() {
-  const mesh = transformControls.object;
-  const isRealMesh = mesh && mesh !== multiProxy && (typeof editPivot === 'undefined' || mesh !== editPivot);
-  faceHandleGroup.visible = !!(isRealMesh && resizeMode === 'one-sided' && transformControls.mode === 'scale' && !editMode.active);
-  if (faceHandleGroup.visible) {
-    transformControls.enabled = false; // avoid the built-in scale gizmo fighting with our own handles
-    transformControls.getHelper ? (transformControls.getHelper().visible = false) : (transformControls.visible = false);
-    updateFaceHandlePositions();
-  } else {
-    transformControls.enabled = true;
-    transformControls.getHelper ? (transformControls.getHelper().visible = true) : (transformControls.visible = true);
-  }
-}
-
-// Dragging state for whichever single face handle is currently grabbed.
-let draggingFaceHandle = null; // { def, mesh, startBoxMin, startBoxMax, startScale, startPos, dragPlane, dragStartPoint }
-
-function onFaceHandlePointerDown(e) {
-  if (!faceHandleGroup.visible) return false;
-  const ndc = screenToNDC(e.clientX, e.clientY);
-  mouse.set(ndc.x, ndc.y);
-  raycaster.setFromCamera(mouse, camera);
-  const hits = raycaster.intersectObjects(faceHandleMeshes, false);
-  if (hits.length === 0) return false;
-  const handle = hits[0].object;
-  const def = handle.userData.faceDef;
-  const mesh = transformControls.object;
-  if (!mesh) return false;
-
-  pushUndo();
-  orbit.enabled = false;
-
-  const box = new THREE.Box3().setFromObject(mesh);
-  // Drag along the world axis line through the handle, projected via a plane facing the camera
-  // but containing that axis — this lets the user move the mouse freely while only the
-  // component along the face's own axis actually affects the resize.
-  const axisVec = new THREE.Vector3(def.axis === 'x' ? 1 : 0, def.axis === 'y' ? 1 : 0, def.axis === 'z' ? 1 : 0);
-  const camDir = new THREE.Vector3();
-  camera.getWorldDirection(camDir);
-  const planeNormal = axisVec.clone().cross(camDir).cross(axisVec).normalize();
-  if (planeNormal.lengthSq() < 1e-6) planeNormal.copy(camDir); // axis parallel to view: fall back
-  const dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, handle.position);
-  const dragStartPoint = new THREE.Vector3();
-  raycaster.ray.intersectPlane(dragPlane, dragStartPoint);
-
-  draggingFaceHandle = {
-    def, mesh,
-    startBoxMin: box.min.clone(),
-    startBoxMax: box.max.clone(),
-    startScale: mesh.scale.clone(),
-    startPos: mesh.position.clone(),
-    axisVec, dragPlane, dragStartPoint: dragStartPoint || handle.position.clone()
-  };
-  return true;
-}
-
-function onFaceHandlePointerMove(e) {
-  if (!draggingFaceHandle) return;
-  const { def, mesh, startBoxMin, startBoxMax, startScale, axisVec, dragPlane, dragStartPoint } = draggingFaceHandle;
-  const ndc = screenToNDC(e.clientX, e.clientY);
-  mouse.set(ndc.x, ndc.y);
-  raycaster.setFromCamera(mouse, camera);
-  const curPoint = new THREE.Vector3();
-  if (!raycaster.ray.intersectPlane(dragPlane, curPoint)) return;
-  const worldDelta = curPoint.clone().sub(dragStartPoint).dot(axisVec); // signed movement along the face's own axis
-  const axis = def.axis, sign = def.sign;
-
-  // The face being dragged moves by (sign * worldDelta) in world space; the opposite face
-  // must stay exactly where it started. Compute the new size directly from the two fixed
-  // world-space face positions, so there is no min/max ambiguity to get backwards.
-  const oppositeCoord = sign > 0 ? startBoxMin[axis] : startBoxMax[axis];
-  const draggedCoordStart = sign > 0 ? startBoxMax[axis] : startBoxMin[axis];
-  const newDraggedCoord = draggedCoordStart + sign * worldDelta;
-  const newSize = sign > 0 ? (newDraggedCoord - oppositeCoord) : (oppositeCoord - newDraggedCoord);
-  const oldSize = sign > 0 ? (startBoxMax[axis] - startBoxMin[axis]) : (startBoxMax[axis] - startBoxMin[axis]);
-  if (newSize <= 0.001 || oldSize <= 1e-6) return; // don't collapse/flip the mesh
-
-  const scaleFactor = newSize / oldSize;
-  mesh.scale[axis] = startScale[axis] * scaleFactor;
-  // Re-measure after the scale change (mesh.scale change moves both faces symmetrically about
-  // the mesh's own origin) and shift position so the opposite face lands back exactly on
-  // oppositeCoord, i.e. exactly where it started.
-  const newBox = new THREE.Box3().setFromObject(mesh);
-  const newOppositeCoord = sign > 0 ? newBox.min[axis] : newBox.max[axis];
-  mesh.position[axis] += (oppositeCoord - newOppositeCoord);
-
-  updateFaceHandlePositions();
-  applySelectionOutlines();
-  updateInspectorTransform();
-}
-
-function onFaceHandlePointerUp() {
-  if (!draggingFaceHandle) return;
-  draggingFaceHandle = null;
-  orbit.enabled = true;
-}
-
-// Installed ahead of the existing click-to-select pointerdown handler (both are on the same
-// element) so grabbing a face handle takes priority and doesn't fall through to selection/orbit.
-renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (editMode.active) return;
-  if (onFaceHandlePointerDown(e)) { e.stopImmediatePropagation(); }
-}, true);
-window.addEventListener('pointermove', onFaceHandlePointerMove);
-window.addEventListener('pointerup', onFaceHandlePointerUp);
-
-// Re-check handle visibility whenever the tool, resize mode, or selection changes.
-const _origSetTool = setTool;
-setTool = function(tool) { _origSetTool(tool); refreshFaceHandleVisibility(); };
-const _origSetResizeMode = setResizeMode;
-setResizeMode = function(mode) { _origSetResizeMode(mode); refreshFaceHandleVisibility(); };
-const _origAttachGizmoToSelection = attachGizmoToSelection;
-attachGizmoToSelection = function() { _origAttachGizmoToSelection(); refreshFaceHandleVisibility(); };
-
 function animate() {
   requestAnimationFrame(animate);
   orbit.update();
   selectionOutlines.forEach(helper => helper.update());
-  if (faceHandleGroup.visible) updateFaceHandlePositions();
   renderer.render(scene, camera);
 }
 animate();
