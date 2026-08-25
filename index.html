@@ -212,6 +212,31 @@
     color:var(--text-0); font-family:var(--font-mono); font-size:11px; padding:3px 5px;
   }
   .anim-track-list{ display:flex; flex-direction:column; gap:4px; max-height:64px; overflow-y:auto; }
+  .anim-clip-toolbar{ display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+  .anim-clip-toolbar select{
+    flex:1; min-width:0;
+    background:var(--bg-2); border:1px solid var(--line); border-radius:6px;
+    color:var(--text-0); font-family:var(--font-ui); font-size:11.5px; font-weight:500;
+    padding:5px 7px;
+  }
+  .export-field{ display:flex; flex-direction:column; gap:5px; margin-bottom:14px; }
+  .export-field label{ font-size:11px; color:var(--text-2); font-weight:600; }
+  .export-field input{
+    background:var(--bg-2); border:1px solid var(--line); border-radius:7px;
+    color:var(--text-0); font-family:var(--font-ui); font-size:12.5px;
+    padding:8px 10px;
+  }
+  .export-field input:focus{ outline:none; border-color:var(--accent); }
+  .export-clip-names{ display:flex; flex-direction:column; gap:8px; margin-bottom:4px; max-height:180px; overflow-y:auto; }
+  .export-clip-names:empty{ display:none; }
+  .export-clip-row{ display:flex; flex-direction:column; gap:5px; }
+  .export-clip-row label{ font-size:10.5px; color:var(--text-2); font-weight:600; }
+  .export-clip-row input{
+    background:var(--bg-2); border:1px solid var(--line); border-radius:7px;
+    color:var(--text-0); font-family:var(--font-ui); font-size:12px;
+    padding:7px 9px;
+  }
+  .export-clip-row input:focus{ outline:none; border-color:var(--accent); }
   .anim-track-row{
     display:grid; grid-template-columns:110px 1fr;
     align-items:center; gap:8px;
@@ -813,6 +838,21 @@
           <span>s</span>
         </div>
       </div>
+      <div class="anim-clip-toolbar" id="anim-clip-toolbar">
+        <select id="anim-clip-select" title="Active animation clip"></select>
+        <div class="anim-btn" id="anim-clip-add" title="New animation clip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <div class="anim-btn" id="anim-clip-rename" title="Rename clip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+        </div>
+        <div class="anim-btn" id="anim-clip-duplicate" title="Duplicate clip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </div>
+        <div class="anim-btn" id="anim-clip-delete" title="Delete clip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></svg>
+        </div>
+      </div>
       <div class="anim-scrub-wrap" id="anim-scrub-wrap" title="Drag or scroll to move through time">
         <div class="anim-scrub-fill" id="anim-scrub-fill"></div>
         <div class="anim-scrub-handle" id="anim-scrub-handle"></div>
@@ -829,6 +869,10 @@
   <div class="modal">
     <h3>Export scene</h3>
     <p>Choose a format to download your model, including transforms and materials.</p>
+    <div class="export-field">
+      <label for="export-model-name">Model name</label>
+      <input type="text" id="export-model-name" value="model" maxlength="80" autocomplete="off">
+    </div>
     <div class="format-opts">
       <div class="format-opt selected" data-fmt="glb">
         <div class="fmt-name">.GLB</div>
@@ -839,6 +883,7 @@
         <div class="fmt-desc">JSON + embedded</div>
       </div>
     </div>
+    <div id="export-clip-names" class="export-clip-names"></div>
     <div class="modal-actions">
       <button class="btn" id="export-cancel">Cancel</button>
       <button class="btn primary" id="export-confirm">Download</button>
@@ -1199,7 +1244,7 @@ function snapshotScene() {
       mapImg: !isMulti && primary.map ? textureToDataURL(primary.map) : null,
       faceMaterials: isMulti ? o.mesh.material.map(serializeMaterial) : null,
       faceLabels: o.faceLabels ? { ...o.faceLabels } : null,
-      animTracks: o.animTracks ? JSON.parse(JSON.stringify(o.animTracks)) : null
+      animClips: o.animClips ? JSON.parse(JSON.stringify(o.animClips)) : null
     };
   });
 }
@@ -1369,31 +1414,59 @@ function restoreScene(snap) {
     mesh.rotation.set(s.rot[0], s.rot[1], s.rot[2]);
     mesh.scale.fromArray(s.scale);
     scene.add(mesh);
-    objects.push({ id: s.id, mesh, name: s.name, type: s.type, faceLabels: s.faceLabels ? { ...s.faceLabels } : undefined, animTracks: s.animTracks ? JSON.parse(JSON.stringify(s.animTracks)) : undefined });
+    objects.push({ id: s.id, mesh, name: s.name, type: s.type, faceLabels: s.faceLabels ? { ...s.faceLabels } : undefined, animClips: s.animClips ? JSON.parse(JSON.stringify(s.animClips)) : (s.animTracks ? { [DEFAULT_CLIP_ID]: JSON.parse(JSON.stringify(s.animTracks)) } : undefined) });
   });
   idCounter = Math.max(1, ...objects.map(o=>o.id), idCounter) + 1;
   refreshOutliner(); refreshInspector(); refreshEmptyState();
   if (typeof refreshAnimTrackList === 'function') refreshAnimTrackList();
+  if (typeof refreshClipSelect === 'function') refreshClipSelect();
+}
+
+// Snapshot bundles both the per-object scene state and the global animation clip
+// registry (id/name/duration list) — clip add/rename/duplicate/delete change the
+// registry itself, not any single object, so it has to ride along or undo silently
+// desyncs clip names from the keyframe data still attached to objects.
+function snapshotFull() {
+  return {
+    objects: snapshotScene(),
+    clips: JSON.parse(JSON.stringify(anim.clips)),
+    activeClipId: anim.activeClipId
+  };
+}
+
+function restoreFull(snap) {
+  restoreScene(snap.objects);
+  anim.clips = snap.clips.length ? snap.clips : [{ id: DEFAULT_CLIP_ID, name: 'Animation', duration: 3 }];
+  anim.activeClipId = anim.clips.some(c => c.id === snap.activeClipId) ? snap.activeClipId : anim.clips[0].id;
+  anim.duration = getActiveClipMeta().duration;
+  anim.time = Math.min(anim.time, anim.duration);
+  if (anim.active) {
+    if (typeof refreshClipSelect === 'function') refreshClipSelect();
+    if (typeof animDurationInput !== 'undefined') animDurationInput.value = anim.duration;
+    applyAnimAtTime(anim.time);
+    if (typeof updateAnimTimeLabel === 'function') updateAnimTimeLabel();
+    if (typeof updateScrubBar === 'function') updateScrubBar();
+  }
 }
 
 function pushUndo() {
-  undoStack.push(snapshotScene());
+  undoStack.push(snapshotFull());
   if (undoStack.length > 25) undoStack.shift();
   redoStack.length = 0;
 }
 
 function doUndo() {
   if (undoStack.length === 0) return;
-  redoStack.push(snapshotScene());
+  redoStack.push(snapshotFull());
   const snap = undoStack.pop();
-  restoreScene(snap);
+  restoreFull(snap);
 }
 
 function doRedo() {
   if (redoStack.length === 0) return;
-  undoStack.push(snapshotScene());
+  undoStack.push(snapshotFull());
   const snap = redoStack.pop();
-  restoreScene(snap);
+  restoreFull(snap);
 }
 
 function makeGeometry(type) {
@@ -2943,10 +3016,46 @@ function addTextMesh() {
 }
 
 // ---------------- EXPORT ----------------
+let currentModelName = 'model'; // carries the last-used export model name across save/load/export
 const exportOverlay = document.getElementById('export-overlay');
-document.getElementById('btn-export').addEventListener('click', () => {
+const exportModelNameInput = document.getElementById('export-model-name');
+const exportClipNamesWrap = document.getElementById('export-clip-names');
+
+// Only offer per-clip export names for clips that actually have keyframes on
+// at least one object — an empty clip has nothing to bake into the file anyway.
+function clipsWithKeyframes() {
+  return anim.clips.filter(meta =>
+    objects.some(o => {
+      const tr = o.animClips && o.animClips[meta.id];
+      return tr && (tr.pos.length || tr.rot.length || tr.scale.length);
+    })
+  );
+}
+
+function openExportDialog() {
+  exportModelNameInput.value = (currentModelName || 'model');
+  exportClipNamesWrap.innerHTML = '';
+  const populated = clipsWithKeyframes();
+  populated.forEach(meta => {
+    const row = document.createElement('div');
+    row.className = 'export-clip-row';
+    const label = document.createElement('label');
+    label.textContent = `Animation name — "${meta.name}" in editor`;
+    label.setAttribute('for', `export-clip-name-${meta.id}`);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = `export-clip-name-${meta.id}`;
+    input.dataset.clipId = meta.id;
+    input.value = meta.name;
+    input.maxLength = 80;
+    input.autocomplete = 'off';
+    row.appendChild(label);
+    row.appendChild(input);
+    exportClipNamesWrap.appendChild(row);
+  });
   exportOverlay.classList.add('show');
-});
+}
+document.getElementById('btn-export').addEventListener('click', openExportDialog);
 document.getElementById('export-cancel').addEventListener('click', () => exportOverlay.classList.remove('show'));
 let exportFmt = 'glb';
 document.querySelectorAll('.format-opt').forEach(opt => {
@@ -2957,11 +3066,28 @@ document.querySelectorAll('.format-opt').forEach(opt => {
   });
 });
 document.getElementById('export-confirm').addEventListener('click', () => {
-  doExport(exportFmt);
+  const rawName = exportModelNameInput.value.trim();
+  const modelName = sanitizeFileBaseName(rawName) || 'model';
+  currentModelName = modelName;
+  const clipNameOverrides = {};
+  exportClipNamesWrap.querySelectorAll('input[data-clip-id]').forEach(input => {
+    const v = input.value.trim();
+    if (v) clipNameOverrides[input.dataset.clipId] = v;
+  });
+  doExport(exportFmt, modelName, clipNameOverrides);
   exportOverlay.classList.remove('show');
 });
 
-function doExport(format) {
+// Strips characters that are unsafe in filenames across OSes (keeps letters,
+// numbers, spaces, hyphens, underscores) — never leaves a name that could
+// silently fail a download or mangle a path.
+function sanitizeFileBaseName(name) {
+  return name.replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function doExport(format, modelName, clipNameOverrides) {
+  modelName = modelName || 'model';
+  clipNameOverrides = clipNameOverrides || {};
   // If we're mid-animation-playback or scrubbed away from t=0, export from each
   // object's authored base pose (not whatever frame is currently displayed) — the
   // animation itself is embedded as a clip, so the static/rest pose should be the start pose.
@@ -2979,7 +3105,7 @@ function doExport(format) {
     exportScene.add(clone);
   });
 
-  const clips = buildAnimationClips(exportScene, objects);
+  const clips = buildAnimationClips(exportScene, objects, clipNameOverrides);
 
   if (wasAnimating) applyAnimAtTime(anim.time); // restore the viewport's scrub position
 
@@ -2988,11 +3114,11 @@ function doExport(format) {
   exporter.parse(exportScene, (result) => {
     if (format === 'glb') {
       const blob = new Blob([result], { type: 'application/octet-stream' });
-      downloadBlob(blob, 'model.glb');
+      downloadBlob(blob, `${modelName}.glb`);
     } else {
       const json = JSON.stringify(result, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
-      downloadBlob(blob, 'model.gltf');
+      downloadBlob(blob, `${modelName}.gltf`);
     }
     showToast(clips.length ? `Exported model.${format} with ${clips.length} animation${clips.length!==1?'s':''}` : `Exported model.${format}`);
   }, (err) => {
@@ -3013,8 +3139,10 @@ function downloadBlob(blob, filename) {
 function saveProject() {
   const project = {
     app: 'formwork-3d-modeler',
-    version: 1,
+    version: 2,
     savedAt: new Date().toISOString(),
+    modelName: currentModelName,
+    animClips: JSON.parse(JSON.stringify(anim.clips)),
     objects: snapshotScene()
   };
   const json = JSON.stringify(project, null, 2);
@@ -3022,6 +3150,34 @@ function saveProject() {
   const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
   downloadBlob(blob, `formwork-project-${stamp}.json`);
   showToast('Project saved');
+}
+
+// Applies the animation-clip registry from a loaded/restored project. Older
+// project files (version 1 or plain arrays) never had a clip registry — in that
+// case restoreScene's own animTracks->animClips migration already put everything
+// under DEFAULT_CLIP_ID, so we synthesize a matching single-clip registry rather
+// than leaving anim.clips pointing at a clip id nothing on disk agrees with.
+function applyLoadedClips(project) {
+  if (Array.isArray(project?.animClips) && project.animClips.length) {
+    anim.clips = project.animClips.map(c => ({
+      id: c.id || DEFAULT_CLIP_ID,
+      name: c.name || 'Animation',
+      duration: (typeof c.duration === 'number' && c.duration > 0) ? c.duration : 3
+    }));
+  } else {
+    anim.clips = [{ id: DEFAULT_CLIP_ID, name: 'Animation', duration: 3 }];
+  }
+  anim.activeClipId = anim.clips[0].id;
+  anim.duration = anim.clips[0].duration;
+  anim.time = 0;
+  if (typeof currentModelName !== 'undefined') currentModelName = project?.modelName || 'model';
+  if (anim.active) {
+    if (typeof refreshClipSelect === 'function') refreshClipSelect();
+    if (typeof animDurationInput !== 'undefined') animDurationInput.value = anim.duration;
+    applyAnimAtTime(anim.time);
+    if (typeof updateAnimTimeLabel === 'function') updateAnimTimeLabel();
+    if (typeof updateScrubBar === 'function') updateScrubBar();
+  }
 }
 
 function loadProjectFromFile(file) {
@@ -3042,6 +3198,7 @@ function loadProjectFromFile(file) {
     }
     pushUndo();
     restoreScene(snap);
+    applyLoadedClips(Array.isArray(project) ? null : project);
     showToast(`Loaded project (${snap.length} object${snap.length!==1?'s':''})`);
   };
   reader.onerror = () => showToast('Load failed — could not read file', true);
@@ -3060,7 +3217,14 @@ document.getElementById('file-load-project').addEventListener('change', (e) => {
 const AUTOSAVE_KEY = 'formwork3d-autosave';
 function autosaveToLocalStorage() {
   try {
-    const project = { app: 'formwork-3d-modeler', version: 1, savedAt: new Date().toISOString(), objects: snapshotScene() };
+    const project = {
+      app: 'formwork-3d-modeler',
+      version: 2,
+      savedAt: new Date().toISOString(),
+      modelName: currentModelName,
+      animClips: JSON.parse(JSON.stringify(anim.clips)),
+      objects: snapshotScene()
+    };
     localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(project));
   } catch (err) {
     console.warn('Autosave failed', err);
@@ -3079,6 +3243,7 @@ window.addEventListener('load', () => {
         const when = project.savedAt ? new Date(project.savedAt).toLocaleString() : 'earlier';
         if (confirm(`Restore your autosaved project from ${when}?`)) {
           restoreScene(project.objects);
+          applyLoadedClips(project);
           showToast('Autosave restored');
         }
       }
@@ -3895,22 +4060,46 @@ toggleEditMode = function() {
 
 // ==================================================================
 // ---------------- ANIMATION MODE ----------------------------------
-// Each object may carry `obj.animTracks = { pos:[{t,x,y,z}], rot:[{t,x,y,z,w}], scale:[{t,x,y,z}] }`
-// (quaternion keyframes for rotation, stored sparsely and sorted by time `t` in seconds).
-// Keyframes are set per-object at the current playhead time via "Add Keyframe".
-// On export, any object with animTracks gets its own THREE.AnimationClip built from
-// VectorKeyframeTrack / QuaternionKeyframeTrack and passed to GLTFExporter so the
-// GLB embeds a real, playable animation (works in model-viewer, Blender, engines, etc).
+// Each object may carry `obj.animClips = { [clipId]: { pos:[...], rot:[...], scale:[...] } }`
+// — one independent keyframe track set per named animation clip (quaternion keyframes
+// for rotation, stored sparsely and sorted by time `t` in seconds). The scene keeps a
+// registry of clips (`anim.clips`), each with its own id/name/duration; `anim.activeClipId`
+// selects which clip the timeline, playhead, and Add Keyframe currently edit.
+// On export, EVERY clip in the registry is baked into its own THREE.AnimationClip per
+// object (named from the export dialog) and passed to GLTFExporter as an array, so the
+// GLB embeds multiple selectable, playable animations (model-viewer, Blender, engines, etc).
 // ==================================================================
+
+const DEFAULT_CLIP_ID = 'clip_1';
 
 const anim = {
   active: false,
   playing: false,
-  time: 0,            // seconds
-  duration: 3,         // seconds
+  time: 0,            // seconds, within the active clip
+  duration: 3,         // seconds, active clip's duration (mirrors anim.clips[activeClipId].duration)
   lastFrameAt: 0,
   loop: true,
+  clips: [ { id: DEFAULT_CLIP_ID, name: 'Animation', duration: 3 } ],
+  activeClipId: DEFAULT_CLIP_ID,
 };
+
+function getActiveClipMeta() {
+  return anim.clips.find(c => c.id === anim.activeClipId) || anim.clips[0];
+}
+
+// Every object's per-clip track set, created lazily and always in sync with anim.clips.
+function ensureClipTracks(o, clipId) {
+  o.animClips = o.animClips || {};
+  if (!o.animClips[clipId]) o.animClips[clipId] = { pos: [], rot: [], scale: [] };
+  return o.animClips[clipId];
+}
+
+function slugifyClipId(name, usedIds) {
+  let base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'clip';
+  let id = base, n = 2;
+  while (usedIds.has(id)) { id = `${base}_${n}`; n++; }
+  return id;
+}
 
 const animTimelinePanel = document.getElementById('tl-anim');
 const tlHeaderDefault = document.getElementById('tl-header-default');
@@ -3921,10 +4110,13 @@ const animTimeLabel = document.getElementById('anim-time-label');
 const animDurationInput = document.getElementById('anim-duration-input');
 const animPlayBtn = document.getElementById('anim-play');
 const animPlayIcon = document.getElementById('anim-play-icon');
+const animClipSelect = document.getElementById('anim-clip-select');
 
 function enterAnimationMode() {
   anim.active = true;
   anim.playing = false;
+  anim.activeClipId = anim.clips[0].id;
+  anim.duration = getActiveClipMeta().duration;
   anim.time = 0;
   transformControls.detach();
   orbit.enabled = true;
@@ -3933,6 +4125,7 @@ function enterAnimationMode() {
   tlTipsDefault.style.display = 'none';
   animSubToolbar.style.display = 'flex';
   animDurationInput.value = anim.duration;
+  refreshClipSelect();
   applyAnimAtTime(anim.time);
   refreshAnimTrackList();
   updateAnimTimeLabel();
@@ -3967,20 +4160,104 @@ function restoreAnimBasePose(o) {
   o.mesh.scale.copy(o.animBasePose.scale);
 }
 
+// ---- Clip management: add / rename / duplicate / delete / switch active clip ----
+function refreshClipSelect() {
+  animClipSelect.innerHTML = '';
+  anim.clips.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.name;
+    if (c.id === anim.activeClipId) opt.selected = true;
+    animClipSelect.appendChild(opt);
+  });
+  document.getElementById('anim-clip-delete').classList.toggle('active', false);
+}
+
+function switchActiveClip(clipId) {
+  const meta = anim.clips.find(c => c.id === clipId);
+  if (!meta) return;
+  anim.playing = false;
+  animPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+  anim.activeClipId = clipId;
+  anim.duration = meta.duration;
+  anim.time = 0;
+  animDurationInput.value = anim.duration;
+  refreshClipSelect();
+  applyAnimAtTime(anim.time);
+  refreshAnimTrackList();
+  updateAnimTimeLabel();
+  updateScrubBar();
+}
+animClipSelect.addEventListener('change', () => switchActiveClip(animClipSelect.value));
+
+function addNewClip() {
+  pushUndo();
+  const usedIds = new Set(anim.clips.map(c => c.id));
+  const n = anim.clips.length + 1;
+  const name = `Animation ${n}`;
+  const id = slugifyClipId(name, usedIds);
+  anim.clips.push({ id, name, duration: 3 });
+  switchActiveClip(id);
+  showToast(`Created animation "${name}"`);
+}
+document.getElementById('anim-clip-add').addEventListener('click', addNewClip);
+
+function renameActiveClip() {
+  const meta = getActiveClipMeta();
+  const next = prompt('Rename animation', meta.name);
+  if (next === null) return;
+  const trimmed = next.trim();
+  if (!trimmed) { showToast('Animation name cannot be empty', true); return; }
+  pushUndo();
+  meta.name = trimmed;
+  refreshClipSelect();
+  showToast(`Renamed to "${trimmed}"`);
+}
+document.getElementById('anim-clip-rename').addEventListener('click', renameActiveClip);
+
+function duplicateActiveClip() {
+  pushUndo();
+  const meta = getActiveClipMeta();
+  const usedIds = new Set(anim.clips.map(c => c.id));
+  const name = `${meta.name} Copy`;
+  const newId = slugifyClipId(name, usedIds);
+  anim.clips.push({ id: newId, name, duration: meta.duration });
+  objects.forEach(o => {
+    if (o.animClips && o.animClips[meta.id]) {
+      o.animClips[newId] = JSON.parse(JSON.stringify(o.animClips[meta.id]));
+    }
+  });
+  switchActiveClip(newId);
+  showToast(`Duplicated as "${name}"`);
+}
+document.getElementById('anim-clip-duplicate').addEventListener('click', duplicateActiveClip);
+
+function deleteActiveClip() {
+  if (anim.clips.length <= 1) { showToast('At least one animation must remain', true); return; }
+  const meta = getActiveClipMeta();
+  if (!confirm(`Delete animation "${meta.name}"? This removes its keyframes on every object.`)) return;
+  pushUndo();
+  anim.clips = anim.clips.filter(c => c.id !== meta.id);
+  objects.forEach(o => { if (o.animClips) delete o.animClips[meta.id]; });
+  switchActiveClip(anim.clips[0].id);
+  showToast(`Deleted "${meta.name}"`);
+}
+document.getElementById('anim-clip-delete').addEventListener('click', deleteActiveClip);
+
 function addKeyframeForSelected() {
   if (!anim.active) { showToast('Enter Animation Mode first', true); return; }
   if (!selected) { showToast('Select an object to keyframe', true); return; }
   pushUndo();
   const o = selected;
   ensureAnimBasePose(o);
-  o.animTracks = o.animTracks || { pos: [], rot: [], scale: [] };
+  const tr = ensureClipTracks(o, anim.activeClipId);
   const t = anim.time;
   const p = o.mesh.position, q = o.mesh.quaternion, s = o.mesh.scale;
-  upsertKey(o.animTracks.pos, { t, x: p.x, y: p.y, z: p.z });
-  upsertKey(o.animTracks.rot, { t, x: q.x, y: q.y, z: q.z, w: q.w });
-  upsertKey(o.animTracks.scale, { t, x: s.x, y: s.y, z: s.z });
+  upsertKey(tr.pos, { t, x: p.x, y: p.y, z: p.z });
+  upsertKey(tr.rot, { t, x: q.x, y: q.y, z: q.z, w: q.w });
+  upsertKey(tr.scale, { t, x: s.x, y: s.y, z: s.z });
   refreshAnimTrackList();
-  showToast(`Keyframe added at ${t.toFixed(2)}s for ${o.name}`);
+  showToast(`Keyframe added at ${t.toFixed(2)}s for ${o.name} (${getActiveClipMeta().name})`);
 }
 document.getElementById('btn-add-keyframe').addEventListener('click', addKeyframeForSelected);
 
@@ -3992,21 +4269,23 @@ function upsertKey(arr, key) {
 
 function removeKeyframe(obj, trackName, t) {
   pushUndo();
-  ['pos', 'rot', 'scale'].forEach(tn => {
-    if (obj.animTracks && obj.animTracks[tn]) {
-      obj.animTracks[tn] = obj.animTracks[tn].filter(k => Math.abs(k.t - t) >= 0.005);
-    }
-  });
+  const tr = obj.animClips && obj.animClips[anim.activeClipId];
+  if (tr) {
+    ['pos', 'rot', 'scale'].forEach(tn => {
+      tr[tn] = tr[tn].filter(k => Math.abs(k.t - t) >= 0.005);
+    });
+  }
   refreshAnimTrackList();
   applyAnimAtTime(anim.time);
 }
 
-// ---- Keyframe clipboard: copy one object's full keyframe (pos+rot+scale at time t),
-// paste it onto any object (same or different) at the current playhead time. ----
+// ---- Keyframe clipboard: copy one object's full keyframe (pos+rot+scale at time t)
+// from the active clip, paste it onto any object (same or different) in the active
+// clip at the current playhead time. ----
 let keyframeClipboard = null; // { pos:{x,y,z}|null, rot:{x,y,z,w}|null, scale:{x,y,z}|null }
 
 function copyKeyframe(obj, t) {
-  const tr = obj.animTracks;
+  const tr = obj.animClips && obj.animClips[anim.activeClipId];
   if (!tr) return;
   const findAt = (arr) => arr.find(k => Math.abs(k.t - t) < 0.005) || null;
   const posKey = findAt(tr.pos), rotKey = findAt(tr.rot), scaleKey = findAt(tr.scale);
@@ -4023,10 +4302,10 @@ function pasteKeyframe(obj, t) {
   if (!keyframeClipboard) { showToast('Clipboard is empty', true); return; }
   pushUndo();
   ensureAnimBasePose(obj);
-  obj.animTracks = obj.animTracks || { pos: [], rot: [], scale: [] };
-  if (keyframeClipboard.pos) upsertKey(obj.animTracks.pos, { t, ...keyframeClipboard.pos });
-  if (keyframeClipboard.rot) upsertKey(obj.animTracks.rot, { t, ...keyframeClipboard.rot });
-  if (keyframeClipboard.scale) upsertKey(obj.animTracks.scale, { t, ...keyframeClipboard.scale });
+  const tr = ensureClipTracks(obj, anim.activeClipId);
+  if (keyframeClipboard.pos) upsertKey(tr.pos, { t, ...keyframeClipboard.pos });
+  if (keyframeClipboard.rot) upsertKey(tr.rot, { t, ...keyframeClipboard.rot });
+  if (keyframeClipboard.scale) upsertKey(tr.scale, { t, ...keyframeClipboard.scale });
   refreshAnimTrackList();
   applyAnimAtTime(anim.time);
   showToast(`Pasted keyframe at ${t.toFixed(2)}s`);
@@ -4096,8 +4375,8 @@ window.addEventListener('keydown', (e) => {
 // them directly to the mesh. Objects without keyframes are left at their base pose.
 function applyAnimAtTime(t) {
   objects.forEach(o => {
-    if (!o.animTracks) return;
-    const tr = o.animTracks;
+    const tr = o.animClips && o.animClips[anim.activeClipId];
+    if (!tr) return;
     ensureAnimBasePose(o);
     if (tr.pos.length) {
       const v = sampleVecTrack(tr.pos, t);
@@ -4196,6 +4475,7 @@ animDurationInput.addEventListener('change', () => {
   const v = parseFloat(animDurationInput.value);
   if (!isNaN(v) && v > 0) {
     anim.duration = v;
+    getActiveClipMeta().duration = v;
     anim.time = Math.min(anim.time, anim.duration);
     updateAnimTimeLabel();
     updateScrubBar();
@@ -4234,13 +4514,17 @@ function refreshAnimTrackList(playheadOnly=false) {
     });
     return;
   }
-  const animated = objects.filter(o => o.animTracks && (o.animTracks.pos.length || o.animTracks.rot.length || o.animTracks.scale.length));
+  const animated = objects.filter(o => {
+    const tr = o.animClips && o.animClips[anim.activeClipId];
+    return tr && (tr.pos.length || tr.rot.length || tr.scale.length);
+  });
   if (animated.length === 0) {
     animTrackList.innerHTML = '<div class="anim-empty-hint">Select an object, then press <b style="color:var(--text-1)">Add Keyframe</b> to start animating it.</div>';
     return;
   }
   animTrackList.innerHTML = '';
   animated.forEach(o => {
+    const clipTr = o.animClips[anim.activeClipId];
     const row = document.createElement('div');
     row.className = 'anim-track-row';
     const nameEl = document.createElement('div');
@@ -4252,7 +4536,7 @@ function refreshAnimTrackList(playheadOnly=false) {
     // All distinct keyframe times across pos/rot/scale for this object, since a user
     // thinks of "a keyframe" as one moment in time, not three separate tracks.
     const times = new Set();
-    ['pos', 'rot', 'scale'].forEach(tn => o.animTracks[tn].forEach(k => times.add(k.t)));
+    ['pos', 'rot', 'scale'].forEach(tn => clipTr[tn].forEach(k => times.add(k.t)));
     [...times].sort((a,b)=>a-b).forEach(t => {
       const dot = document.createElement('div');
       dot.className = 'anim-key-dot';
@@ -4306,36 +4590,43 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'k' || e.key === 'K') { e.preventDefault(); addKeyframeForSelected(); }
 });
 
-// Builds one THREE.AnimationClip per animated object (named "<ObjectName>Action"),
-// using the track's own keyframe times/values directly — GLTFExporter supports an
-// array of clips per scene and assigns each clip's tracks to the correct glTF node
-// via track name "<uuid>.position" etc, which it resolves against object.uuid/name.
-function buildAnimationClips(exportScene, sourceObjects) {
+// Builds one THREE.AnimationClip per (registered animation clip), merging every
+// animated object's tracks for that clip into a single glTF animation — using each
+// track's own keyframe times/values directly. GLTFExporter supports an array of
+// clips per scene and assigns each clip's tracks to the correct glTF node via track
+// name "<nodeName>.position" etc, which it resolves against the cloned node's name.
+// `clipNameOverrides` is an optional { [clipId]: exportName } map from the export
+// dialog, so the person can name each animation on the way out without renaming
+// their in-editor clips.
+function buildAnimationClips(exportScene, sourceObjects, clipNameOverrides) {
   const clips = [];
-  sourceObjects.forEach((o, i) => {
-    if (!o.animTracks) return;
-    const tr = o.animTracks;
-    const hasKeys = tr.pos.length || tr.rot.length || tr.scale.length;
-    if (!hasKeys) return;
-    const targetName = exportScene.children[i].name; // clone name matches o.name (1:1 order)
+  anim.clips.forEach(clipMeta => {
     const tracks = [];
-    if (tr.pos.length) {
-      const times = tr.pos.map(k => k.t);
-      const values = tr.pos.flatMap(k => [k.x, k.y, k.z]);
-      tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.position`, times, values));
-    }
-    if (tr.rot.length) {
-      const times = tr.rot.map(k => k.t);
-      const values = tr.rot.flatMap(k => [k.x, k.y, k.z, k.w]);
-      tracks.push(new THREE.QuaternionKeyframeTrack(`${targetName}.quaternion`, times, values));
-    }
-    if (tr.scale.length) {
-      const times = tr.scale.map(k => k.t);
-      const values = tr.scale.flatMap(k => [k.x, k.y, k.z]);
-      tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.scale`, times, values));
-    }
+    sourceObjects.forEach((o, i) => {
+      if (!o.animClips || !o.animClips[clipMeta.id]) return;
+      const tr = o.animClips[clipMeta.id];
+      const hasKeys = tr.pos.length || tr.rot.length || tr.scale.length;
+      if (!hasKeys) return;
+      const targetName = exportScene.children[i].name; // clone name matches o.name (1:1 order)
+      if (tr.pos.length) {
+        const times = tr.pos.map(k => k.t);
+        const values = tr.pos.flatMap(k => [k.x, k.y, k.z]);
+        tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.position`, times, values));
+      }
+      if (tr.rot.length) {
+        const times = tr.rot.map(k => k.t);
+        const values = tr.rot.flatMap(k => [k.x, k.y, k.z, k.w]);
+        tracks.push(new THREE.QuaternionKeyframeTrack(`${targetName}.quaternion`, times, values));
+      }
+      if (tr.scale.length) {
+        const times = tr.scale.map(k => k.t);
+        const values = tr.scale.flatMap(k => [k.x, k.y, k.z]);
+        tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.scale`, times, values));
+      }
+    });
     if (tracks.length) {
-      clips.push(new THREE.AnimationClip(`${o.name}Action`, anim.duration, tracks));
+      const exportName = (clipNameOverrides && clipNameOverrides[clipMeta.id]) || clipMeta.name;
+      clips.push(new THREE.AnimationClip(exportName, clipMeta.duration, tracks));
     }
   });
   return clips;
