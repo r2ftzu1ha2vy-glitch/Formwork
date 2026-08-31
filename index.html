@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Formwork — 3D Modeler</title>
 <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64,AAABAAEAEBAAAAAAIAAqAwAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/YQAAAvFJREFUeJx1k0to3FUUxn/3/u9kXv/JZDKZTNPJwxgLRqRSQVtUHNyrC4tu3BRBqOJC0GVgFHztiiKKCEoQdBFERFQ01FpFUUHEhprGDJaZ5mESJs5kJpnX/97jIkwbgn67c873fYtzzgeHIIIq5PMGIKJBPmBkf6K4UNjv/ycEVCGPAbVfv2Tu/uLp2+bnZh7eqL51ckbexAegIFoK6J5OAUgBrV5UDgQpMPrb+vjMJ/+MPnlxO6397DHJ39qv7oouLz+gf37BPFf80O5rNeCUgFIgUiBWKqefmdsZf/7bxtHMyl44GIhom0oltI6lbTKZipzMtjllL83fsf3VjDnX/CUQlBJQ9TOR+z7du/mdz+pj00u7UfH7TDtqnFlbX8Vax9TUMRLJQUd0UMZzI+HjQdFVfv36iWc/X5g1CuT8Tuzxdyuj0zWJNdJRHa7Vts1iqcR2pUoi2c9WdY+JXFaPT0xSqRZ3375yOf7X35UTwKwBaDmv2d5ruK7tmPLWjrpaLpOMGV55qI/7b2nKuR+1+nJ5laHdMmdTRe+9dlo2+o822VjDAChBa621WEel1uDUqMdHpy1jgx1BhHtP7/Hq92kuFKNcCk2y6E8o3WpqgOt3dc4hTqE8TV+rze8LlkROVDOAN5YizJW6mFSO1zcccdPFBV2uG4h1zjlxIgIiiAibmy3qRjizMMg3KyH8OGSiu/jG4KwWa63r3RLliGultBMXCEhEQyamiIUcO10hFHYY5RCBTmADZ52y1sV7BqrU8OYarc5V43m+Q+lkn9iJqCVqEBEHysP3k1ZEBBE/6LZrLuhcBJQGeOq7zfnL17buDIL2a3FPOj/VIuHZtbjVHm4gEXcDqSEbjkTD4qzX7Xbeb9erJ1bLSx8femUcwPDw8PG6Db3cJvTgPekuncgQK7sK7TrnrQ0K6+U/f+DAKx/Mk8rnb6QtdyT3SOLI1OLI5O1/jN00/dgN2qNeb3f/B90j5DMZP5vNxg8EzztM/hfGNV1mWcyfBAAAAABJRU5ErkJggg==">
+<!--
+  Text-on-face font stack: one combined Google Fonts request covering every family
+  listed in TEXT_FONTS further down. Kept as a single <link> (rather than one per
+  font) to minimize round trips. `display=swap` avoids invisible text while a face
+  loads; the app also explicitly awaits document.fonts.load() before drawing a face
+  texture (see renderTextTexture/ensureFontLoaded), so text-on-model never silently
+  renders in a fallback font just because the webfont hadn't finished downloading yet.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Roboto:wght@400;700;900&family=Open+Sans:wght@400;700&family=Lato:wght@400;700;900&family=Montserrat:wght@400;700;900&family=Poppins:wght@400;700;900&family=Raleway:wght@400;700;900&family=Nunito:wght@400;700;900&family=Work+Sans:wght@400;700&family=Rubik:wght@400;700;900&family=Barlow:wght@400;700&family=Archivo:wght@400;700;900&family=Space+Grotesk:wght@400;700&family=Mulish:wght@400;700&family=Karla:wght@400;700&family=Manrope:wght@400;700;800&family=DM+Sans:wght@400;700&family=Playfair+Display:wght@400;700;900&family=Merriweather:wght@400;700;900&family=Lora:wght@400;700&family=PT+Serif:wght@400;700&family=Crimson+Text:wght@400;700&family=EB+Garamond:wght@400;700&family=Cormorant+Garamond:wght@400;700&family=Bitter:wght@400;700&family=Libre+Baskerville:wght@400;700&family=Source+Serif+Pro:wght@400;700&family=Anton&family=Bebas+Neue&family=Archivo+Black&family=Alfa+Slab+One&family=Bungee&family=Passion+One:wght@700;900&family=Righteous&family=Fjalla+One&family=Oswald:wght@400;700&family=Staatliches&family=Pacifico&family=Dancing+Script:wght@400;700&family=Caveat:wght@400;700&family=Permanent+Marker&family=Shadows+Into+Light&family=Great+Vibes&family=Satisfy&family=Kalam:wght@400;700&family=Amatic+SC:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Roboto+Mono:wght@400;700&family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;700&family=Fira+Code:wght@400;700&family=Courier+Prime:wght@400;700&family=Orbitron:wght@400;700;900&family=Press+Start+2P&family=Audiowide&family=Russo+One&family=Bungee+Inline&family=Barlow+Condensed:wght@400;700&family=Big+Shoulders+Display:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg-0:#15161a;
@@ -680,6 +691,60 @@
   .toast svg{ width:15px; height:15px; color:var(--green); }
   .toast.error{ border-color:rgba(232,99,107,0.5); }
   .toast.error svg{ color:var(--red); }
+
+  /* ---------- Font picker (with per-item live preview, A-Z) ---------- */
+  .font-picker{ position:relative; }
+  .font-picker-btn{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    width:100%; box-sizing:border-box;
+    background:var(--bg-2); border:1px solid var(--line); border-radius:6px;
+    padding:8px 10px; color:var(--text-0);
+    font-family:var(--font-ui); font-size:13.5px;
+    cursor:pointer; transition:border-color .12s;
+    text-align:left;
+  }
+  .font-picker-btn:hover{ border-color:#454854; }
+  .font-picker.open .font-picker-btn{ border-color:var(--accent); }
+  .font-picker-btn svg{ width:13px; height:13px; flex-shrink:0; color:var(--text-2); transition:transform .12s; }
+  .font-picker.open .font-picker-btn svg{ transform:rotate(180deg); }
+  .font-picker-btn-label{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .font-picker-dropdown{
+    display:none;
+    position:absolute; left:0; right:0; top:calc(100% + 4px);
+    background:var(--bg-1); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 14px 34px rgba(0,0,0,0.4);
+    z-index:20; overflow:hidden;
+    flex-direction:column;
+  }
+  .font-picker.open .font-picker-dropdown{ display:flex; }
+  .font-picker-search{
+    width:100%; box-sizing:border-box;
+    background:var(--bg-2); border:none; border-bottom:1px solid var(--line);
+    padding:9px 10px; color:var(--text-0);
+    font-family:var(--font-ui); font-size:12.5px;
+    outline:none; flex-shrink:0;
+  }
+  .font-picker-list{
+    max-height:220px; overflow-y:auto;
+    padding:4px;
+  }
+  .font-picker-item{
+    display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+    padding:8px 9px; border-radius:6px; cursor:pointer;
+  }
+  .font-picker-item:hover{ background:var(--bg-3); }
+  .font-picker-item.active{ background:var(--accent-dim); }
+  .fp-name{
+    flex-shrink:0; font-family:var(--font-ui); font-size:10.5px; font-weight:600;
+    color:var(--text-2); letter-spacing:0.2px;
+  }
+  .font-picker-item.active .fp-name{ color:var(--accent); }
+  .fp-preview{
+    flex:1; min-width:0; text-align:right;
+    color:var(--text-0); font-size:17px; line-height:1.2;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .font-picker-empty{ padding:16px 10px; text-align:center; color:var(--text-2); font-size:12px; }
 </style>
 </head>
 <body>
@@ -3200,15 +3265,121 @@ document.getElementById('theme-control').querySelectorAll('.seg-opt').forEach(op
 const FACE_ORDER = ['right', 'left', 'up', 'down', 'front', 'back'];
 const FACE_LABEL = { right:'Right (+X)', left:'Left (-X)', up:'Up (+Y)', down:'Down (-Y)', front:'Front (+Z)', back:'Back (-Z)' };
 
+// Every id here has a matching family in the Google Fonts <link> in <head>.
+// `css` always ends in a matching generic fallback (sans-serif/serif/monospace/
+// cursive) so text still renders sensibly for the split second before the
+// webfont finishes loading, or if the font request ever fails outright.
 const TEXT_FONTS = [
-  { id: 'inter', label: 'Inter (Sans)', css: "'Inter', sans-serif" },
-  { id: 'mono', label: 'Mono', css: "'JetBrains Mono', 'SF Mono', Consolas, monospace" },
-  { id: 'serif', label: 'Serif', css: "Georgia, 'Times New Roman', serif" },
-  { id: 'condensed', label: 'Condensed', css: "'Arial Narrow', sans-serif" },
-  { id: 'cursive', label: 'Script', css: "'Brush Script MT', cursive" }
+  // Sans-serif
+  { id: 'inter', label: 'Inter', category: 'Sans-serif', css: "'Inter', sans-serif" },
+  { id: 'roboto', label: 'Roboto', category: 'Sans-serif', css: "'Roboto', sans-serif" },
+  { id: 'opensans', label: 'Open Sans', category: 'Sans-serif', css: "'Open Sans', sans-serif" },
+  { id: 'lato', label: 'Lato', category: 'Sans-serif', css: "'Lato', sans-serif" },
+  { id: 'montserrat', label: 'Montserrat', category: 'Sans-serif', css: "'Montserrat', sans-serif" },
+  { id: 'poppins', label: 'Poppins', category: 'Sans-serif', css: "'Poppins', sans-serif" },
+  { id: 'raleway', label: 'Raleway', category: 'Sans-serif', css: "'Raleway', sans-serif" },
+  { id: 'nunito', label: 'Nunito', category: 'Sans-serif', css: "'Nunito', sans-serif" },
+  { id: 'worksans', label: 'Work Sans', category: 'Sans-serif', css: "'Work Sans', sans-serif" },
+  { id: 'rubik', label: 'Rubik', category: 'Sans-serif', css: "'Rubik', sans-serif" },
+  { id: 'barlow', label: 'Barlow', category: 'Sans-serif', css: "'Barlow', sans-serif" },
+  { id: 'archivo', label: 'Archivo', category: 'Sans-serif', css: "'Archivo', sans-serif" },
+  { id: 'spacegrotesk', label: 'Space Grotesk', category: 'Sans-serif', css: "'Space Grotesk', sans-serif" },
+  { id: 'mulish', label: 'Mulish', category: 'Sans-serif', css: "'Mulish', sans-serif" },
+  { id: 'karla', label: 'Karla', category: 'Sans-serif', css: "'Karla', sans-serif" },
+  { id: 'manrope', label: 'Manrope', category: 'Sans-serif', css: "'Manrope', sans-serif" },
+  { id: 'dmsans', label: 'DM Sans', category: 'Sans-serif', css: "'DM Sans', sans-serif" },
+  // Serif
+  { id: 'playfair', label: 'Playfair Display', category: 'Serif', css: "'Playfair Display', serif" },
+  { id: 'merriweather', label: 'Merriweather', category: 'Serif', css: "'Merriweather', serif" },
+  { id: 'lora', label: 'Lora', category: 'Serif', css: "'Lora', serif" },
+  { id: 'ptserif', label: 'PT Serif', category: 'Serif', css: "'PT Serif', serif" },
+  { id: 'crimson', label: 'Crimson Text', category: 'Serif', css: "'Crimson Text', serif" },
+  { id: 'ebgaramond', label: 'EB Garamond', category: 'Serif', css: "'EB Garamond', serif" },
+  { id: 'cormorant', label: 'Cormorant Garamond', category: 'Serif', css: "'Cormorant Garamond', serif" },
+  { id: 'bitter', label: 'Bitter', category: 'Serif', css: "'Bitter', serif" },
+  { id: 'librebaskerville', label: 'Libre Baskerville', category: 'Serif', css: "'Libre Baskerville', serif" },
+  { id: 'sourceserif', label: 'Source Serif Pro', category: 'Serif', css: "'Source Serif Pro', serif" },
+  // Display / bold
+  { id: 'anton', label: 'Anton', category: 'Display', css: "'Anton', sans-serif" },
+  { id: 'bebasneue', label: 'Bebas Neue', category: 'Display', css: "'Bebas Neue', sans-serif" },
+  { id: 'archivoblack', label: 'Archivo Black', category: 'Display', css: "'Archivo Black', sans-serif" },
+  { id: 'alfaslabone', label: 'Alfa Slab One', category: 'Display', css: "'Alfa Slab One', serif" },
+  { id: 'bungee', label: 'Bungee', category: 'Display', css: "'Bungee', sans-serif" },
+  { id: 'passionone', label: 'Passion One', category: 'Display', css: "'Passion One', sans-serif" },
+  { id: 'righteous', label: 'Righteous', category: 'Display', css: "'Righteous', sans-serif" },
+  { id: 'fjallaone', label: 'Fjalla One', category: 'Display', css: "'Fjalla One', sans-serif" },
+  { id: 'oswald', label: 'Oswald', category: 'Display', css: "'Oswald', sans-serif" },
+  { id: 'staatliches', label: 'Staatliches', category: 'Display', css: "'Staatliches', sans-serif" },
+  { id: 'barlowcondensed', label: 'Barlow Condensed', category: 'Display', css: "'Barlow Condensed', sans-serif" },
+  { id: 'bigshoulders', label: 'Big Shoulders', category: 'Display', css: "'Big Shoulders Display', sans-serif" },
+  // Handwriting / script
+  { id: 'pacifico', label: 'Pacifico', category: 'Handwriting', css: "'Pacifico', cursive" },
+  { id: 'dancingscript', label: 'Dancing Script', category: 'Handwriting', css: "'Dancing Script', cursive" },
+  { id: 'caveat', label: 'Caveat', category: 'Handwriting', css: "'Caveat', cursive" },
+  { id: 'permanentmarker', label: 'Permanent Marker', category: 'Handwriting', css: "'Permanent Marker', cursive" },
+  { id: 'shadowsintolight', label: 'Shadows Into Light', category: 'Handwriting', css: "'Shadows Into Light', cursive" },
+  { id: 'greatvibes', label: 'Great Vibes', category: 'Handwriting', css: "'Great Vibes', cursive" },
+  { id: 'satisfy', label: 'Satisfy', category: 'Handwriting', css: "'Satisfy', cursive" },
+  { id: 'kalam', label: 'Kalam', category: 'Handwriting', css: "'Kalam', cursive" },
+  { id: 'amaticsc', label: 'Amatic SC', category: 'Handwriting', css: "'Amatic SC', cursive" },
+  // Monospace
+  { id: 'jetbrainsmono', label: 'JetBrains Mono', category: 'Monospace', css: "'JetBrains Mono', monospace" },
+  { id: 'robotomono', label: 'Roboto Mono', category: 'Monospace', css: "'Roboto Mono', monospace" },
+  { id: 'spacemono', label: 'Space Mono', category: 'Monospace', css: "'Space Mono', monospace" },
+  { id: 'ibmplexmono', label: 'IBM Plex Mono', category: 'Monospace', css: "'IBM Plex Mono', monospace" },
+  { id: 'firacode', label: 'Fira Code', category: 'Monospace', css: "'Fira Code', monospace" },
+  { id: 'courierprime', label: 'Courier Prime', category: 'Monospace', css: "'Courier Prime', monospace" },
+  // Techy / novelty
+  { id: 'orbitron', label: 'Orbitron', category: 'Techy', css: "'Orbitron', sans-serif" },
+  { id: 'pressstart2p', label: 'Press Start 2P', category: 'Techy', css: "'Press Start 2P', monospace" },
+  { id: 'audiowide', label: 'Audiowide', category: 'Techy', css: "'Audiowide', sans-serif" },
+  { id: 'russoone', label: 'Russo One', category: 'Techy', css: "'Russo One', sans-serif" },
+  { id: 'bungeeinline', label: 'Bungee Inline', category: 'Techy', css: "'Bungee Inline', sans-serif" }
 ];
 function fontCss(fontId) {
-  return (TEXT_FONTS.find(f => f.id === fontId) || TEXT_FONTS[0]).css;
+  const resolved = resolveFontId(fontId);
+  return (TEXT_FONTS.find(f => f.id === resolved) || TEXT_FONTS[0]).css;
+}
+
+// Old projects saved before this font expansion used 5 generic ids. Map them to
+// their closest new equivalent so previously-saved text-on-face labels don't all
+// silently flatten to Inter on load.
+const LEGACY_FONT_ALIAS = { mono: 'jetbrainsmono', serif: 'ptserif', condensed: 'barlowcondensed', cursive: 'shadowsintolight' };
+function resolveFontId(fontId) {
+  if (TEXT_FONTS.some(f => f.id === fontId)) return fontId;
+  return LEGACY_FONT_ALIAS[fontId] || 'inter';
+}
+
+// Extracts the quoted family name out of a TEXT_FONTS css stack (e.g. "'Anton', sans-serif"
+// -> "Anton") for use with the Font Loading API, which wants a bare family name rather
+// than a full font-family CSS value.
+function fontFamilyName(fontId) {
+  const css = fontCss(fontId);
+  const m = css.match(/'([^']+)'/);
+  return m ? m[1] : css.split(',')[0].trim();
+}
+
+// Google Fonts are loaded via <link> in <head>, but the browser only actually
+// fetches a given weight/style the first time something on the page needs it —
+// and canvas text drawn before that fetch resolves silently renders in the
+// fallback font with NO error or warning. This awaits the real webfont (at the
+// weight text-on-face actually draws with, "bold") before letting the caller draw,
+// so picking an exotic font always renders as that font on the first try.
+const fontLoadCache = new Map();
+async function ensureFontLoaded(fontId) {
+  if (fontLoadCache.has(fontId)) return fontLoadCache.get(fontId);
+  const family = fontFamilyName(fontId);
+  const promise = (async () => {
+    if (!document.fonts) return; // very old browser — just fall through to canvas default
+    try {
+      await document.fonts.load(`bold 72px "${family}"`);
+      await document.fonts.ready;
+    } catch (err) {
+      console.warn(`Font "${family}" failed to load, falling back to default:`, err);
+    }
+  })();
+  fontLoadCache.set(fontId, promise);
+  return promise;
 }
 
 // Renders `text` into a square canvas and returns a ready-to-use CanvasTexture.
@@ -3217,12 +3388,14 @@ function fontCss(fontId) {
 // through hole showing whatever is behind the mesh, which read as "the face went
 // invisible." A solid backing color keeps the face opaque while a different color can
 // still be typed in to match/contrast the object.
-function renderTextTexture(text, opts = {}) {
+async function renderTextTexture(text, opts = {}) {
   const size = opts.size || 512;
   const fontSize = opts.fontSize || 72;
   const bg = opts.bg || '#ffffff';
   const fg = opts.color || '#000000';
   const fontFamily = fontCss(opts.font);
+  await ensureFontLoaded(resolveFontId(opts.font)); // must resolve before any ctx.font/measureText call below,
+                                                      // or the whole texture silently bakes in the fallback font
   const cnv = document.createElement('canvas');
   cnv.width = size; cnv.height = size;
   const ctx = cnv.getContext('2d');
@@ -3410,9 +3583,17 @@ function showTextFaceModal(obj) {
       <textarea id="tf-text" rows="3" style="width:100%; resize:vertical; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; padding:8px 9px; color:var(--text-0); font-family:var(--font-ui); font-size:12.5px; margin-bottom:14px;" placeholder="Enter label text&hellip;"></textarea>
 
       <div class="field-label" style="margin-bottom:6px;">Font</div>
-      <select id="tf-font" style="width:100%; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; padding:7px 9px; color:var(--text-0); font-family:var(--font-ui); font-size:12.5px; margin-bottom:14px;">
-        ${TEXT_FONTS.map(f => `<option value="${f.id}">${f.label}</option>`).join('')}
-      </select>
+      <div id="tf-font-picker" class="font-picker">
+        <button type="button" id="tf-font-btn" class="font-picker-btn">
+          <span id="tf-font-btn-label" class="font-picker-btn-label">Inter</span>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+        </button>
+        <div id="tf-font-dropdown" class="font-picker-dropdown">
+          <input type="text" id="tf-font-search" class="font-picker-search" placeholder="Search fonts…" autocomplete="off">
+          <div id="tf-font-list" class="font-picker-list"></div>
+        </div>
+      </div>
+      <div id="tf-font-preview" style="width:100%; box-sizing:border-box; padding:12px 10px; margin-top:8px; margin-bottom:14px; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; color:var(--text-0); font-size:22px; line-height:1.2; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Preview</div>
 
       <div class="field-label" style="margin-bottom:6px; display:flex; justify-content:space-between;">
         <span>Text size</span>
@@ -3443,24 +3624,140 @@ function showTextFaceModal(obj) {
   document.body.appendChild(overlay);
 
   const textEl = document.getElementById('tf-text');
-  const fontEl = document.getElementById('tf-font');
   const sizeEl = document.getElementById('tf-size');
   const sizeValEl = document.getElementById('tf-size-val');
   const fgEl = document.getElementById('tf-fg');
   const bgEl = document.getElementById('tf-bg');
   const removeBtn = document.getElementById('tf-remove');
+  const previewEl = document.getElementById('tf-font-preview');
+
+  // ---- Custom font picker: A-Z list, each row rendered live in its own font
+  // using whatever text has been typed so far, so picking a font IS the preview
+  // instead of a name in a generic UI font that says nothing about its look. ----
+  const fontPickerEl = document.getElementById('tf-font-picker');
+  const fontBtn = document.getElementById('tf-font-btn');
+  const fontBtnLabel = document.getElementById('tf-font-btn-label');
+  const fontDropdown = document.getElementById('tf-font-dropdown');
+  const fontSearchEl = document.getElementById('tf-font-search');
+  const fontListEl = document.getElementById('tf-font-list');
+  const sortedFonts = [...TEXT_FONTS].sort((a, b) => a.label.localeCompare(b.label));
+  let selectedFontId = 'inter';
+
+  function renderFontList(filter) {
+    const q = (filter || '').trim().toLowerCase();
+    const sampleText = textEl.value.trim();
+    fontListEl.innerHTML = '';
+    const matches = sortedFonts.filter(f => !q || f.label.toLowerCase().includes(q));
+    if (!matches.length) {
+      const empty = document.createElement('div');
+      empty.className = 'font-picker-empty';
+      empty.textContent = 'No fonts match';
+      fontListEl.appendChild(empty);
+      return;
+    }
+    matches.forEach(f => {
+      const item = document.createElement('div');
+      item.className = 'font-picker-item' + (f.id === selectedFontId ? ' active' : '');
+      item.dataset.fontId = f.id;
+      const name = document.createElement('span');
+      name.className = 'fp-name';
+      name.textContent = f.label;
+      const preview = document.createElement('span');
+      preview.className = 'fp-preview';
+      preview.style.fontFamily = f.css;
+      preview.textContent = sampleText || f.label;
+      item.appendChild(name);
+      item.appendChild(preview);
+      item.addEventListener('click', () => {
+        selectFont(f.id);
+        closeFontDropdown();
+      });
+      fontListEl.appendChild(item);
+      ensureFontLoaded(f.id); // warm every visible face while the list is open, not just the chosen one
+    });
+  }
+
+  // Keeps every visible row's preview text in sync as the user types, without
+  // tearing down/rebuilding the whole list (which would lose scroll position).
+  function refreshFontListPreviewText() {
+    const sampleText = textEl.value.trim();
+    fontListEl.querySelectorAll('.fp-preview').forEach(el => {
+      const item = el.closest('.font-picker-item');
+      const f = sortedFonts.find(x => x.id === item.dataset.fontId);
+      el.textContent = sampleText || (f ? f.label : '');
+    });
+  }
+
+  function selectFont(id) {
+    selectedFontId = id;
+    const f = sortedFonts.find(x => x.id === id) || sortedFonts[0];
+    fontBtnLabel.textContent = f.label;
+    fontBtnLabel.style.fontFamily = f.css;
+    fontListEl.querySelectorAll('.font-picker-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.fontId === f.id);
+    });
+    updatePreview();
+  }
+
+  function openFontDropdown() {
+    fontPickerEl.classList.add('open');
+    fontSearchEl.value = '';
+    renderFontList('');
+    const active = fontListEl.querySelector('.font-picker-item.active');
+    if (active) active.scrollIntoView({ block: 'nearest' });
+    fontSearchEl.focus();
+  }
+  function closeFontDropdown() {
+    fontPickerEl.classList.remove('open');
+  }
+  fontBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (fontPickerEl.classList.contains('open')) closeFontDropdown();
+    else openFontDropdown();
+  });
+  fontSearchEl.addEventListener('input', () => renderFontList(fontSearchEl.value));
+  fontSearchEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeFontDropdown(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const first = fontListEl.querySelector('.font-picker-item');
+      if (first) { selectFont(first.dataset.fontId); closeFontDropdown(); }
+    }
+  });
+  // Closing on outside-click needs to be undone when the modal is closed, or every
+  // reopening of this tool piles up another listener on `document` that outlives
+  // the (now-detached) picker — a slow, invisible memory leak.
+  const onDocClickForFontPicker = (e) => {
+    if (!fontPickerEl.contains(e.target)) closeFontDropdown();
+  };
+  document.addEventListener('click', onDocClickForFontPicker);
 
   sizeEl.addEventListener('input', () => { sizeValEl.textContent = sizeEl.value; });
+
+  // Live preview: updates on every keystroke/font change using real CSS font-family
+  // (instant, no canvas re-render needed) so scrolling through 60 fonts is fast even
+  // though the actual texture render (on Apply) awaits the webfont properly.
+  function updatePreview() {
+    previewEl.textContent = textEl.value.trim() || 'Preview';
+    previewEl.style.fontFamily = fontCss(selectedFontId);
+    previewEl.style.color = fgEl.value;
+    previewEl.style.background = bgEl.value;
+    ensureFontLoaded(selectedFontId); // kick off the fetch now so it's warm by the time Apply is clicked
+  }
+  textEl.addEventListener('input', () => { updatePreview(); refreshFontListPreviewText(); });
+  fgEl.addEventListener('input', updatePreview);
+  bgEl.addEventListener('input', updatePreview);
 
   function loadFaceIntoForm(face) {
     const label = obj.faceLabels && obj.faceLabels[face];
     textEl.value = label ? label.text : '';
-    fontEl.value = (label && label.font) || 'inter';
+    selectFont(resolveFontId((label && label.font) || 'inter'));
     sizeEl.value = (label && label.fontSize) || 72;
     sizeValEl.textContent = sizeEl.value;
     fgEl.value = (label && label.color) || '#000000';
     bgEl.value = (label && label.bg) || '#ffffff';
     removeBtn.style.display = label ? '' : 'none';
+    updatePreview();
   }
   loadFaceIntoForm(chosenFace);
 
@@ -3491,7 +3788,10 @@ function showTextFaceModal(obj) {
   });
   grid.querySelector(`[data-face="${chosenFace}"]`).dispatchEvent(new Event('click'));
 
-  const closeModal = () => overlay.remove();
+  const closeModal = () => {
+    document.removeEventListener('click', onDocClickForFontPicker);
+    overlay.remove();
+  };
   document.getElementById('tf-cancel').addEventListener('click', closeModal);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
 
@@ -3506,14 +3806,28 @@ function showTextFaceModal(obj) {
     closeModal();
   });
 
-  document.getElementById('tf-apply').addEventListener('click', () => {
+  const applyBtn = document.getElementById('tf-apply');
+  applyBtn.addEventListener('click', async () => {
     const text = textEl.value.trim();
     if (!text) { showToast('Enter some text first', true); return; }
-    const font = fontEl.value;
+    const font = selectedFontId;
     const fontSize = parseInt(sizeEl.value, 10);
     const color = fgEl.value;
     const bg = bgEl.value;
-    const tex = renderTextTexture(text, { font, color, bg, fontSize });
+    // Some fonts (especially the more decorative Handwriting/Techy ones) may not have
+    // been fetched by the browser yet — ensureFontLoaded (inside renderTextTexture)
+    // downloads it on first use, which can take a beat, so give a quick visual cue
+    // rather than leaving the button looking unresponsive.
+    applyBtn.disabled = true;
+    applyBtn.textContent = 'Rendering…';
+    let tex;
+    try {
+      tex = await renderTextTexture(text, { font, color, bg, fontSize });
+    } finally {
+      applyBtn.disabled = false;
+      applyBtn.textContent = 'Apply';
+    }
+    if (!overlay.isConnected) return; // modal was closed/cancelled while the font was loading
     pushUndo();
     applyFaceTexture(obj, chosenFace, tex);
     if (!obj.faceLabels) obj.faceLabels = {};
