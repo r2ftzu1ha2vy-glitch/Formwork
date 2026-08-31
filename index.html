@@ -1909,34 +1909,67 @@ function duplicateSelected() {
 }
 
 // ---- Copy / paste (Ctrl+C / Ctrl+V) ----
-// Note: groups are skipped here (kept selected as-is, not copied) rather than crashing —
-// the clipboard format is flat {geometry,material} data with no concept of a parent/child
-// hierarchy. Ctrl+D (duplicateSelected, above) is the supported way to clone a group.
+// Groups are copyable too: each clipboard entry is either a flat {geometry,material}
+// blob (plain object) or a {isGroup:true, members:[...]} blob (group), so paste can
+// tell the two apart and rebuild a group instead of dropping its members loose.
 let clipboard = [];
 function copySelected() {
   if (selectedSet.size === 0) return;
-  const skippedGroups = [...selectedSet].filter(id => {
-    const o = objects.find(x => x.id === id);
-    return o && o.type === 'group';
-  }).length;
   clipboard = [...selectedSet].map(id => {
     const obj = objects.find(o => o.id === id);
-    return (obj && obj.type !== 'group') ? cloneMeshDataFor(obj) : null;
+    if (!obj) return null;
+    if (obj.type === 'group') {
+      const memberIds = new Set(obj.childIds || []);
+      const members = objects.filter(o => memberIds.has(o.id));
+      if (members.length === 0) return null;
+      return { isGroup: true, name: obj.name, members: members.map(m => cloneMeshDataFor(m)) };
+    }
+    return cloneMeshDataFor(obj);
   }).filter(Boolean);
-  showToast(skippedGroups
-    ? `Copied ${clipboard.length} object${clipboard.length !== 1 ? 's' : ''} (groups aren't copyable — use Ctrl+D instead)`
-    : `Copied ${clipboard.length} object${clipboard.length !== 1 ? 's' : ''}`);
+  const groupCount = clipboard.filter(c => c.isGroup).length;
+  const total = clipboard.reduce((n, c) => n + (c.isGroup ? c.members.length : 1), 0);
+  showToast(`Copied ${total} object${total !== 1 ? 's' : ''}${groupCount ? ` (${groupCount} group${groupCount !== 1 ? 's' : ''})` : ''}`);
 }
 
 function pasteClipboard() {
   if (clipboard.length === 0) return;
   pushUndo();
   const offset = new THREE.Vector3(0.6, 0, 0.6);
-  const newObjs = clipboard.map(data => createObjectFromClone(data, data.pos.clone().add(offset)));
-  // Nudge clipboard positions forward so a repeated paste keeps stepping outward
-  clipboard = clipboard.map((data, i) => ({ ...data, pos: newObjs[i].mesh.position.clone() }));
-  setSelection(newObjs);
-  showToast(`Pasted ${newObjs.length} object${newObjs.length !== 1 ? 's' : ''}`);
+  const newTopLevel = [];
+  const nextClipboard = [];
+
+  clipboard.forEach(entry => {
+    if (entry.isGroup) {
+      const copies = entry.members.map(data => createObjectFromClone(data, data.pos.clone().add(offset)));
+      let newGroup = null;
+      if (copies.length >= 2) {
+        const group = new THREE.Group();
+        scene.add(group);
+        const center = new THREE.Vector3();
+        copies.forEach(o => center.add(o.mesh.position));
+        center.divideScalar(copies.length);
+        group.position.copy(center);
+        copies.forEach(o => group.attach(o.mesh));
+        const id = idCounter++;
+        newGroup = { id, mesh: group, name: (entry.name || 'Group') + ' copy', type: 'group', childIds: copies.map(o => o.id) };
+        objects = objects.filter(o => !copies.some(c => c.id === o.id));
+        objects.push(newGroup);
+      }
+      newTopLevel.push(newGroup || copies[0]);
+      // Nudge this clipboard group's stored positions forward for the next paste
+      nextClipboard.push({ ...entry, members: entry.members.map((data, i) => ({ ...data, pos: copies[i].mesh.position.clone() })) });
+    } else {
+      const newObj = createObjectFromClone(entry, entry.pos.clone().add(offset));
+      newTopLevel.push(newObj);
+      nextClipboard.push({ ...entry, pos: newObj.mesh.position.clone() });
+    }
+  });
+
+  clipboard = nextClipboard;
+  refreshOutliner();
+  setSelection(newTopLevel.filter(Boolean));
+  const total = newTopLevel.reduce((n, o, i) => n + (clipboard[i].isGroup ? clipboard[i].members.length : 1), 0);
+  showToast(`Pasted ${total} object${total !== 1 ? 's' : ''}`);
 }
 
 // Proxy group used so the gizmo can move/rotate/scale multiple objects together
@@ -2313,6 +2346,8 @@ transformControls.addEventListener('objectChange', () => {
 
   if (transformControls.mode === 'scale' && target && target !== multiProxy && (typeof editPivot === 'undefined' || target !== editPivot)) {
     applyOneSidedResize(target);
+    const scaledObj = objects.find(o => o.mesh === target);
+    if (scaledObj) refreshFitTextTextures(scaledObj);
   }
 
   updateInspectorTransform();
@@ -3192,6 +3227,14 @@ function faceWorldSize(obj, face) {
   }
 }
 
+// width/height of a face as a plain aspect ratio, used to bake "Fit" text textures
+// at the face's real proportions instead of always assuming a square.
+function faceAspectRatio(obj, face) {
+  const sz = faceWorldSize(obj, face);
+  if (!sz.h || sz.h < 1e-6) return 1;
+  return sz.w / sz.h;
+}
+
 // Applies the current global texture mode to one image texture. In Tile mode the texture repeats
 // at its own native pixel aspect ratio in BOTH directions — the tile is sized to fit within the
 // face without ever being stretched (by the shorter of "fit by width" or "fit by height"), then
@@ -3389,26 +3432,38 @@ async function ensureFontLoaded(fontId) {
 // invisible." A solid backing color keeps the face opaque while a different color can
 // still be typed in to match/contrast the object.
 async function renderTextTexture(text, opts = {}) {
-  const size = opts.size || 512;
+  const baseSize = opts.size || 512;
   const fontSize = opts.fontSize || 72;
   const bg = opts.bg || '#ffffff';
   const fg = opts.color || '#000000';
+  const fit = opts.fit || 'stretch'; // 'fit' = bake at the face's own aspect so nothing distorts; 'stretch' = old square-canvas behavior
+  // In 'fit' mode the canvas itself is drawn at the face's real width:height ratio
+  // (clamped so neither side balloons past 2:1 into a giant texture), so when Three.js
+  // maps it 0..1 across the face's UVs there's no stretch left to happen — the texture
+  // already IS the face's shape. In 'stretch' mode we keep the old square canvas, which
+  // Three.js then stretches to fill whatever the face's actual width/height happens to be.
+  let cw = baseSize, ch = baseSize;
+  if (fit && opts.faceAspect && isFinite(opts.faceAspect) && opts.faceAspect > 0) {
+    const a = Math.max(0.5, Math.min(2, opts.faceAspect)); // clamp to avoid absurd texture dimensions on very long thin faces
+    if (a >= 1) { cw = baseSize; ch = Math.round(baseSize / a); }
+    else { ch = baseSize; cw = Math.round(baseSize * a); }
+  }
   const fontFamily = fontCss(opts.font);
   await ensureFontLoaded(resolveFontId(opts.font)); // must resolve before any ctx.font/measureText call below,
                                                       // or the whole texture silently bakes in the fallback font
   const cnv = document.createElement('canvas');
-  cnv.width = size; cnv.height = size;
+  cnv.width = cw; cnv.height = ch;
   const ctx = cnv.getContext('2d');
   ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, size, size);
+  ctx.fillRect(0, 0, cw, ch);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = fg;
 
   // Word-wrap to fit within the canvas with padding, shrinking the font if needed,
   // so arbitrary label lengths never clip or overflow off the texture.
-  const padding = size * 0.1;
-  const maxWidth = size - padding * 2;
+  const padding = Math.min(cw, ch) * 0.1;
+  const maxWidth = cw - padding * 2;
   let fs = fontSize;
   let lines;
   while (true) {
@@ -3430,13 +3485,13 @@ async function renderTextTexture(text, opts = {}) {
     const lineHeight = fs * 1.25;
     const totalHeight = lineHeight * lines.length;
     const widest = Math.max(...lines.map(l => ctx.measureText(l).width));
-    if ((totalHeight <= size - padding * 2 && widest <= maxWidth) || fs <= 14) break;
+    if ((totalHeight <= ch - padding * 2 && widest <= maxWidth) || fs <= 14) break;
     fs -= 4;
   }
   ctx.font = `bold ${fs}px ${fontFamily}`;
   const lineHeight = fs * 1.25;
-  const startY = size / 2 - (lineHeight * (lines.length - 1)) / 2;
-  lines.forEach((line, i) => ctx.fillText(line, size / 2, startY + i * lineHeight));
+  const startY = ch / 2 - (lineHeight * (lines.length - 1)) / 2;
+  lines.forEach((line, i) => ctx.fillText(line, cw / 2, startY + i * lineHeight));
 
   const tex = new THREE.CanvasTexture(cnv);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -3595,6 +3650,22 @@ function showTextFaceModal(obj) {
       </div>
       <div id="tf-font-preview" style="width:100%; box-sizing:border-box; padding:12px 10px; margin-top:8px; margin-bottom:14px; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; color:var(--text-0); font-size:22px; line-height:1.2; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Preview</div>
 
+      <div class="field-label" style="margin-bottom:6px;">Text fit</div>
+      <div id="tf-fit-toggle" class="seg-toggle" style="display:flex; gap:6px; margin-bottom:14px;">
+        <div class="seg-opt" data-value="fit" style="flex:1; text-align:center;">Fit (keep proportions)</div>
+        <div class="seg-opt" data-value="stretch" style="flex:1; text-align:center;">Stretch (fill face)</div>
+      </div>
+        <button type="button" id="tf-font-btn" class="font-picker-btn">
+          <span id="tf-font-btn-label" class="font-picker-btn-label">Inter</span>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+        </button>
+        <div id="tf-font-dropdown" class="font-picker-dropdown">
+          <input type="text" id="tf-font-search" class="font-picker-search" placeholder="Search fonts…" autocomplete="off">
+          <div id="tf-font-list" class="font-picker-list"></div>
+        </div>
+      </div>
+      <div id="tf-font-preview" style="width:100%; box-sizing:border-box; padding:12px 10px; margin-top:8px; margin-bottom:14px; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; color:var(--text-0); font-size:22px; line-height:1.2; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Preview</div>
+
       <div class="field-label" style="margin-bottom:6px; display:flex; justify-content:space-between;">
         <span>Text size</span>
         <span id="tf-size-val" style="color:var(--text-2); font-family:var(--font-mono);"></span>
@@ -3630,6 +3701,19 @@ function showTextFaceModal(obj) {
   const bgEl = document.getElementById('tf-bg');
   const removeBtn = document.getElementById('tf-remove');
   const previewEl = document.getElementById('tf-font-preview');
+  const fitToggleEl = document.getElementById('tf-fit-toggle');
+  let selectedFit = 'stretch';
+
+  function setFit(val) {
+    selectedFit = val;
+    fitToggleEl.querySelectorAll('.seg-opt').forEach(el => {
+      el.classList.toggle('active', el.dataset.value === val);
+    });
+    updatePreview();
+  }
+  fitToggleEl.querySelectorAll('.seg-opt').forEach(el => {
+    el.addEventListener('click', () => setFit(el.dataset.value));
+  });
 
   // ---- Custom font picker: A-Z list, each row rendered live in its own font
   // using whatever text has been typed so far, so picking a font IS the preview
@@ -3742,6 +3826,17 @@ function showTextFaceModal(obj) {
     previewEl.style.fontFamily = fontCss(selectedFontId);
     previewEl.style.color = fgEl.value;
     previewEl.style.background = bgEl.value;
+    // Reflects the chosen fit mode in the little preview box too: Fit shows the
+    // face's real aspect ratio (so a wide flat face previews wide, not square),
+    // Stretch always previews as a square, matching how it'll actually render.
+    if (selectedFit === 'fit') {
+      const aspect = faceAspectRatio(obj, chosenFace);
+      previewEl.style.aspectRatio = String(aspect);
+      previewEl.style.height = 'auto';
+    } else {
+      previewEl.style.aspectRatio = '';
+      previewEl.style.height = '';
+    }
     ensureFontLoaded(selectedFontId); // kick off the fetch now so it's warm by the time Apply is clicked
   }
   textEl.addEventListener('input', () => { updatePreview(); refreshFontListPreviewText(); });
@@ -3757,6 +3852,7 @@ function showTextFaceModal(obj) {
     fgEl.value = (label && label.color) || '#000000';
     bgEl.value = (label && label.bg) || '#ffffff';
     removeBtn.style.display = label ? '' : 'none';
+    setFit((label && label.fit) || 'stretch');
     updatePreview();
   }
   loadFaceIntoForm(chosenFace);
@@ -3814,6 +3910,8 @@ function showTextFaceModal(obj) {
     const fontSize = parseInt(sizeEl.value, 10);
     const color = fgEl.value;
     const bg = bgEl.value;
+    const fit = selectedFit;
+    const faceAspect = faceAspectRatio(obj, chosenFace);
     // Some fonts (especially the more decorative Handwriting/Techy ones) may not have
     // been fetched by the browser yet — ensureFontLoaded (inside renderTextTexture)
     // downloads it on first use, which can take a beat, so give a quick visual cue
@@ -3822,7 +3920,7 @@ function showTextFaceModal(obj) {
     applyBtn.textContent = 'Rendering…';
     let tex;
     try {
-      tex = await renderTextTexture(text, { font, color, bg, fontSize });
+      tex = await renderTextTexture(text, { font, color, bg, fontSize, fit, faceAspect });
     } finally {
       applyBtn.disabled = false;
       applyBtn.textContent = 'Apply';
@@ -3831,7 +3929,7 @@ function showTextFaceModal(obj) {
     pushUndo();
     applyFaceTexture(obj, chosenFace, tex);
     if (!obj.faceLabels) obj.faceLabels = {};
-    obj.faceLabels[chosenFace] = { text, font, color, bg, fontSize };
+    obj.faceLabels[chosenFace] = { text, font, color, bg, fontSize, fit };
     selectObject(obj);
     refreshOutliner();
     refreshInspector();
