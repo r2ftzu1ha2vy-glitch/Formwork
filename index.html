@@ -1903,9 +1903,15 @@ function duplicateGroup(groupObj) {
     id, mesh: group,
     name: (groupObj.name || 'Group') + ' copy',
     type: 'group',
-    childIds: copies.map(o => o.id)
+    childIds: copies.map(o => o.id),
+    expanded: true
   };
-  objects = objects.filter(o => !copies.some(c => c.id === o.id));
+  // IMPORTANT: copies stay in `objects` (mirrors groupSelected) and get tagged with
+  // __groupParentId so the outliner's top-level pass skips them and its nested pass
+  // renders them under newGroup instead. The previous version filtered the copies
+  // OUT of `objects` here, which deleted their records entirely — the group row
+  // still showed a member count, but there was nothing left to expand into.
+  copies.forEach(o => { o.__groupParentId = id; });
   objects.push(newGroup);
   refreshOutliner();
   return newGroup;
@@ -1966,8 +1972,8 @@ function pasteClipboard() {
         group.position.copy(center);
         copies.forEach(o => group.attach(o.mesh));
         const id = idCounter++;
-        newGroup = { id, mesh: group, name: (entry.name || 'Group') + ' copy', type: 'group', childIds: copies.map(o => o.id) };
-        objects = objects.filter(o => !copies.some(c => c.id === o.id));
+        newGroup = { id, mesh: group, name: (entry.name || 'Group') + ' copy', type: 'group', childIds: copies.map(o => o.id), expanded: true };
+        copies.forEach(o => { o.__groupParentId = id; });
         objects.push(newGroup);
       }
       newTopLevel.push(newGroup || copies[0]);
