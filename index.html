@@ -1861,7 +1861,22 @@ function createObjectFromClone(data, posOverride) {
 
 function duplicateObject(obj) {
   const data = cloneMeshDataFor(obj);
-  const pos = obj.mesh.position.clone().add(new THREE.Vector3(0.6, 0, 0.6));
+  // obj.mesh.position/rotation/scale are LOCAL — for a plain top-level object that's
+  // also its world transform, but for a group member (reparented under the group's
+  // THREE.Group via attach()) it's relative to the group, not the scene. Using it
+  // directly here placed every member except whichever had a near-zero local offset
+  // in the wrong spot (often stacked at/near the origin), which looked like "only
+  // the first part duplicated". Read the true world transform instead so a duplicate
+  // always lands next to the original regardless of group nesting.
+  const worldPos = new THREE.Vector3();
+  const worldQuat = new THREE.Quaternion();
+  const worldScale = new THREE.Vector3();
+  obj.mesh.updateWorldMatrix(true, false);
+  obj.mesh.matrixWorld.decompose(worldPos, worldQuat, worldScale);
+  data.pos = worldPos;
+  data.rot = new THREE.Euler().setFromQuaternion(worldQuat, obj.mesh.rotation.order);
+  data.scale = worldScale;
+  const pos = worldPos.clone().add(new THREE.Vector3(0.6, 0, 0.6));
   return createObjectFromClone(data, pos);
 }
 
@@ -2469,10 +2484,13 @@ function refreshEmptyState() {
 function updateStats() {
   let tris = 0;
   objects.forEach(o => {
+    if (o.type === 'group') return; // groups are THREE.Group wrappers with no geometry of their own —
+                                      // their triangles are already counted via their member objects
     const pos = o.mesh.geometry.attributes.position;
     tris += o.mesh.geometry.index ? o.mesh.geometry.index.count/3 : pos.count/3;
   });
-  document.getElementById('scene-stats').textContent = `${objects.length} object${objects.length!==1?'s':''} · ${Math.round(tris)} tris`;
+  const meshCount = objects.filter(o => o.type !== 'group').length;
+  document.getElementById('scene-stats').textContent = `${meshCount} object${meshCount!==1?'s':''} · ${Math.round(tris)} tris`;
 }
 
 // ---------------- INSPECTOR ----------------
