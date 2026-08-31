@@ -4052,7 +4052,11 @@ function doExport(format, modelName, clipNameOverrides) {
     // GLTFExporter understands a material array directly (it maps geometry groups
     // to glTF primitives, one per material) — clone each face material independently
     // so the exported file keeps distinct per-face textures.
-    clone.material = Array.isArray(o.mesh.material) ? o.mesh.material.map(m => m.clone()) : o.mesh.material.clone();
+    // Groups (o.type === 'group') are plain THREE.Group wrappers with no geometry
+    // or material of their own, so skip the material clone for them.
+    if (o.mesh.material) {
+      clone.material = Array.isArray(o.mesh.material) ? o.mesh.material.map(m => m.clone()) : o.mesh.material.clone();
+    }
     clone.name = o.name;
     exportScene.add(clone);
   });
