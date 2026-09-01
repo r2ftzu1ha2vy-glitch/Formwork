@@ -3148,6 +3148,26 @@ document.getElementById('file-import').addEventListener('change', (e) => {
       const color = (mat && mat.color) ? '#'+mat.color.getHexString() : colorPresets[objects.length % colorPresets.length];
       const map = (mat && mat.map) ? mat.map : null;
 
+      // Was this mesh invisible in the source file? Three checks, since a
+      // file can hide a part any of these ways:
+      //  1. Object3D.visible === false on the mesh itself or any ancestor
+      //     up to the import root (glTF's KHR_node_visibility-style hiding).
+      //  2. Material.visible === false (a material-level hide, independent
+      //     of the node transform hierarchy).
+      //  3. A transparent material sitting at (or near) zero opacity —
+      //     the common "invisible collision mesh" pattern from DCC tools.
+      // Previously none of this was read, so every imported mesh came in
+      // fully opaque and visible regardless of how it looked in the file.
+      let chainVisible = true;
+      for (let n = child; n && n !== rootObject3D.parent; n = n.parent) {
+        if (n.visible === false) { chainVisible = false; break; }
+      }
+      const matVisible = mat ? mat.visible !== false : true;
+      const srcOpacity = (mat && typeof mat.opacity === 'number') ? mat.opacity : 1;
+      const srcTransparent = !!(mat && mat.transparent);
+      const sourceHidden = !chainVisible || !matVisible || (srcTransparent && srcOpacity <= 0.01);
+      const importOpacity = sourceHidden ? 0 : (srcTransparent ? srcOpacity : 1);
+
       // Prefer the mesh's own name from the file (glTF node/mesh name, OBJ
       // object/group name). Fall back to the filename if the mesh has no
       // name, or if it collides with the file's base name generically
@@ -3168,7 +3188,8 @@ document.getElementById('file-import').addEventListener('change', (e) => {
         scale: worldScale.length() > 0 ? worldScale : new THREE.Vector3(1,1,1),
         color, map,
         roughness: mat?.roughness ?? 0.55,
-        metalness: mat?.metalness ?? 0.08
+        metalness: mat?.metalness ?? 0.08,
+        opacity: importOpacity
       }, true);
       return obj;
     });
@@ -3188,15 +3209,24 @@ document.getElementById('file-import').addEventListener('change', (e) => {
 });
 
 function addPrimitiveFromGeometry(geometry, opts, skipSelect=false) {
+  const opacity = opts.opacity ?? 1;
   const mat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(opts.color || '#ffffff'),
     roughness: opts.roughness ?? 0.55,
     metalness: opts.metalness ?? 0.08,
     map: opts.map || null,
-    side: THREE.FrontSide
+    side: THREE.FrontSide,
+    opacity,
+    transparent: opacity < 0.99 || !!opts.map,
+    depthWrite: opacity >= 0.99
   });
   const mesh = new THREE.Mesh(geometry, mat);
   mesh.castShadow = true; mesh.receiveShadow = true;
+  // If this object is coming in below full opacity (e.g. it was hidden or
+  // partially transparent in the source file), record what "restore" should
+  // mean so the outliner's ghost eye-icon can bring it back to fully opaque
+  // with a single click instead of leaving it stuck translucent/invisible.
+  if (opacity < 0.99) mesh.userData.preGhostOpacity = 1;
   if (opts.position) mesh.position.copy(opts.position);
   if (opts.rotation) mesh.rotation.copy(opts.rotation);
   if (opts.scale) mesh.scale.copy(opts.scale);
