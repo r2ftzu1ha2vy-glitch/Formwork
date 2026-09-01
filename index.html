@@ -3127,6 +3127,11 @@ document.getElementById('file-import').addEventListener('change', (e) => {
       showToast('No mesh geometry found in file', true);
       return;
     }
+    // Track how many times each resolved name has been used so far in this
+    // import batch, so duplicate mesh names (common with Blender exports that
+    // reuse names like "Cube" across objects) get de-duplicated with a
+    // numeric suffix instead of silently colliding in the outliner.
+    const nameCounts = new Map();
     const newObjs = meshesFound.map((child, i) => {
       child.geometry.computeVertexNormals();
       child.geometry.center();
@@ -3143,8 +3148,21 @@ document.getElementById('file-import').addEventListener('change', (e) => {
       const color = (mat && mat.color) ? '#'+mat.color.getHexString() : colorPresets[objects.length % colorPresets.length];
       const map = (mat && mat.map) ? mat.map : null;
 
+      // Prefer the mesh's own name from the file (glTF node/mesh name, OBJ
+      // object/group name). Fall back to the filename if the mesh has no
+      // name, or if it collides with the file's base name generically
+      // (e.g. Three.js's OBJLoader sometimes names the root mesh "" or
+      // reuses the group name).
+      const rawMeshName = (child.name && child.name.trim()) ? child.name.trim() : null;
+      const fallbackName = meshesFound.length > 1 ? `${baseName}_${i+1}` : baseName;
+      let resolvedName = rawMeshName || fallbackName;
+
+      const seen = nameCounts.get(resolvedName) || 0;
+      nameCounts.set(resolvedName, seen + 1);
+      if (seen > 0) resolvedName = `${resolvedName}_${seen+1}`;
+
       const obj = addPrimitiveFromGeometry(child.geometry, {
-        name: meshesFound.length > 1 ? `${baseName}_${i+1}` : baseName,
+        name: resolvedName,
         position: worldPos,
         rotation: worldRot,
         scale: worldScale.length() > 0 ? worldScale : new THREE.Vector3(1,1,1),
