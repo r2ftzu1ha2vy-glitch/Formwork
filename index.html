@@ -831,6 +831,14 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
       <span class="btn-label">Duplicate</span>
     </button>
+    <button class="btn" id="btn-flip-x" title="Flip selection horizontally, left/right (X axis)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18" stroke-dasharray="2 2" opacity="0.5"/><path d="M18 8l3 4-3 4M6 8l-3 4 3 4"/></svg>
+      <span class="btn-label">Flip X</span>
+    </button>
+    <button class="btn" id="btn-flip-z" title="Flip selection front/back (Z axis)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18" stroke-dasharray="2 2" opacity="0.5"/><path d="M8 6l4-3 4 3M8 18l4 3 4-3"/></svg>
+      <span class="btn-label">Flip Z</span>
+    </button>
     <button class="btn" id="btn-import" title="Import (.glb/.gltf/.obj)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/></svg>
       <span class="btn-label">Import</span>
@@ -1412,6 +1420,7 @@ function snapshotOneObject(o, useWorldTransform) {
       id: o.id,
       name: o.name,
       type: o.type,
+      collision: o.collision !== false,
       geomJSON: o.mesh.geometry.toJSON(),
       pos, rot, scale,
       color: '#' + primary.color.getHexString(),
@@ -1592,7 +1601,7 @@ function restoreScene(snap) {
     mesh.rotation.set(s.rot[0], s.rot[1], s.rot[2]);
     mesh.scale.fromArray(s.scale);
     scene.add(mesh);
-    objects.push({ id: s.id, mesh, name: s.name, type: s.type, faceLabels: s.faceLabels ? { ...s.faceLabels } : undefined, animClips: s.animClips ? JSON.parse(JSON.stringify(s.animClips)) : (s.animTracks ? { [DEFAULT_CLIP_ID]: JSON.parse(JSON.stringify(s.animTracks)) } : undefined) });
+    objects.push({ id: s.id, mesh, name: s.name, type: s.type, collision: s.collision !== false, faceLabels: s.faceLabels ? { ...s.faceLabels } : undefined, animClips: s.animClips ? JSON.parse(JSON.stringify(s.animClips)) : (s.animTracks ? { [DEFAULT_CLIP_ID]: JSON.parse(JSON.stringify(s.animTracks)) } : undefined) });
   });
   idCounter = Math.max(1, ...objects.map(o=>o.id), idCounter) + 1;
   refreshOutliner(); refreshInspector(); refreshEmptyState();
@@ -1719,7 +1728,7 @@ function addPrimitive(type, opts={}, skipSelect=false) {
 
   const id = idCounter++;
   const count = objects.filter(o=>o.type===type).length;
-  const obj = { id, mesh, name: opts.name || `${typeLabel[type]}${count>0?'.'+String(count).padStart(3,'0'):''}`, type };
+  const obj = { id, mesh, name: opts.name || `${typeLabel[type]}${count>0?'.'+String(count).padStart(3,'0'):''}`, type, collision: opts.collision !== false };
   objects.push(obj);
   if (!skipSelect) selectObject(obj);
   refreshOutliner();
@@ -1852,7 +1861,7 @@ function createObjectFromClone(data, posOverride) {
 
   const id = idCounter++;
   const count = objects.filter(o => o.type === data.type).length;
-  const obj = { id, mesh, name: data.name ? data.name + ' copy' : `${typeLabel[data.type]}${count>0?'.'+String(count).padStart(3,'0'):''}`, type: data.type, faceLabels: data.faceLabels ? { ...data.faceLabels } : undefined };
+  const obj = { id, mesh, name: data.name ? data.name + ' copy' : `${typeLabel[data.type]}${count>0?'.'+String(count).padStart(3,'0'):''}`, type: data.type, faceLabels: data.faceLabels ? { ...data.faceLabels } : undefined, collision: data.collision !== false };
   objects.push(obj);
   refreshOutliner();
   refreshEmptyState();
@@ -2131,6 +2140,78 @@ function attachGizmoToSelection() {
 function restoreFromProxy() {
   proxyChildOffsets = [];
 }
+
+// ---------------- FLIP (mirror selection across an axis) ----------------
+// Works for a single object or a multi-part selection. When multiple objects
+// are selected, they're mirrored as one rigid group: geometry is mirrored
+// per-mesh, and each mesh's position is reflected around the shared
+// selection centroid (not its own origin), so a multi-part model flips as a
+// whole instead of every part flipping in place and falling apart.
+function flipSelection(axis) {
+  const selObjs = objects.filter(o => selectedSet.has(o.id) && o.mesh);
+  if (selObjs.length === 0) { showToast('Select an object to flip', true); return; }
+  pushUndo();
+
+  const center = new THREE.Vector3();
+  selObjs.forEach(o => center.add(o.mesh.position));
+  center.divideScalar(selObjs.length);
+
+  const scaleVec = new THREE.Vector3(1,1,1);
+  scaleVec[axis] = -1;
+
+  selObjs.forEach(o => {
+    const mesh = o.mesh;
+
+    // Mirror the geometry itself so triangle winding stays correct (a naive
+    // negative scale alone would turn the mesh inside-out under lighting).
+    const geom = mesh.geometry;
+    const posAttr = geom.attributes.position;
+    const axisIdx = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
+    for (let i = 0; i < posAttr.count; i++) {
+      posAttr.setComponent(i, axisIdx, -posAttr.getComponent(i, axisIdx));
+    }
+    posAttr.needsUpdate = true;
+    if (geom.attributes.normal) {
+      const normAttr = geom.attributes.normal;
+      for (let i = 0; i < normAttr.count; i++) {
+        normAttr.setComponent(i, axisIdx, -normAttr.getComponent(i, axisIdx));
+      }
+      normAttr.needsUpdate = true;
+    }
+    // Flip index winding order so faces don't render inside-out after the
+    // position/normal mirror above.
+    if (geom.index) {
+      const idx = geom.index.array;
+      for (let i = 0; i + 2 < idx.length; i += 3) {
+        const tmp = idx[i+1];
+        idx[i+1] = idx[i+2];
+        idx[i+2] = tmp;
+      }
+      geom.index.needsUpdate = true;
+    }
+    geom.computeVertexNormals();
+
+    // Mirror this mesh's position around the shared selection centroid, and
+    // mirror its rotation so its local orientation flips consistently with
+    // the geometry (otherwise a rotated part would end up facing the wrong
+    // way relative to its neighbors after the group flip).
+    const rel = mesh.position.clone().sub(center);
+    rel[axis] = -rel[axis];
+    mesh.position.copy(center).add(rel);
+
+    const euler = mesh.rotation;
+    if (axis === 'x') { euler.y = -euler.y; euler.z = -euler.z; }
+    else if (axis === 'y') { euler.x = -euler.x; euler.z = -euler.z; }
+    else { euler.x = -euler.x; euler.y = -euler.y; }
+  });
+
+  attachGizmoToSelection();
+  refreshInspector();
+  showToast(`Flipped ${selObjs.length} object${selObjs.length!==1?'s':''} (${axis.toUpperCase()})`);
+}
+
+document.getElementById('btn-flip-x').addEventListener('click', () => flipSelection('x'));
+document.getElementById('btn-flip-z').addEventListener('click', () => flipSelection('z'));
 
 // ---------------- GROUPING (Ctrl+G / Ctrl+Shift+G) ----------------
 // A group is just another entry in `objects` — type:'group', mesh is a THREE.Group
@@ -2432,6 +2513,7 @@ function refreshOutliner() {
     row.innerHTML = `
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${iconFor(obj.type)}</svg>
       <span class="name">${obj.name}</span>
+      ${obj.collision === false ? '<span style="font-size:9px; color:var(--text-2); border:1px solid var(--line); border-radius:3px; padding:1px 4px; margin-right:4px; flex-shrink:0;" title="No collision — player passes through in-game">NC</span>' : ''}
       <div class="swatch" style="background:#${rowMat.color.getHexString()}"></div>
       <svg class="vis-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" title="${isGhosted ? 'Restore full opacity' : 'Make see-through'}" style="${isGhosted ? 'opacity:1; color:var(--accent);' : ''}">${
         isGhosted
@@ -2657,6 +2739,14 @@ function refreshInspector() {
       </div>
       <input type="file" id="f-tex-input" accept="image/*" style="display:none">
 
+      <div class="field-label">Collision</div>
+      <div class="color-row" style="margin-bottom:6px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; color:var(--text-1);">
+          <input type="checkbox" id="f-collision" ${o.collision !== false ? 'checked' : ''}>
+          Solid in-game (player collides with this object)
+        </label>
+      </div>
+
       <div class="field-label">Text on Face</div>
       <button class="btn" id="f-text-face" style="width:100%; justify-content:center; margin-bottom:6px;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
@@ -2716,6 +2806,18 @@ function refreshInspector() {
   bindXYZ('pos', o.mesh.position);
   bindXYZ('rot', o.mesh.rotation, true);
   bindXYZ('scl', o.mesh.scale);
+
+  // Collision toggle — stored on the object model and later stamped into
+  // exported glTF node.extras so a game engine's importer can skip collider
+  // generation for objects flagged non-solid.
+  const collisionEl = document.getElementById('f-collision');
+  if (collisionEl) {
+    collisionEl.addEventListener('change', (e) => {
+      pushUndo();
+      o.collision = e.target.checked;
+      refreshOutliner();
+    });
+  }
 
   function setColor(hexVal, mark) {
     if (mark) mark();
@@ -3181,6 +3283,15 @@ document.getElementById('file-import').addEventListener('change', (e) => {
       nameCounts.set(resolvedName, seen + 1);
       if (seen > 0) resolvedName = `${resolvedName}_${seen+1}`;
 
+      // If this file was previously exported from this editor, GLTFExporter
+      // will have stamped node.extras.collision from userData.collision.
+      // Three's GLTFLoader surfaces glTF extras back on child.userData, so
+      // read it here — otherwise re-importing a no-collision object would
+      // silently reset it back to solid.
+      const importedCollision = (child.userData && child.userData.collision !== undefined)
+        ? child.userData.collision !== false
+        : true;
+
       const obj = addPrimitiveFromGeometry(child.geometry, {
         name: resolvedName,
         position: worldPos,
@@ -3189,7 +3300,8 @@ document.getElementById('file-import').addEventListener('change', (e) => {
         color, map,
         roughness: mat?.roughness ?? 0.55,
         metalness: mat?.metalness ?? 0.08,
-        opacity: importOpacity
+        opacity: importOpacity,
+        collision: importedCollision
       }, true);
       return obj;
     });
@@ -3232,7 +3344,7 @@ function addPrimitiveFromGeometry(geometry, opts, skipSelect=false) {
   if (opts.scale) mesh.scale.copy(opts.scale);
   scene.add(mesh);
   const id = idCounter++;
-  const obj = { id, mesh, name: opts.name || `Import.${String(id).padStart(3,'0')}`, type: 'imported' };
+  const obj = { id, mesh, name: opts.name || `Import.${String(id).padStart(3,'0')}`, type: 'imported', collision: opts.collision !== false };
   objects.push(obj);
   if (!skipSelect) selectObject(obj);
   return obj;
@@ -3699,7 +3811,7 @@ function showTextFaceModal(obj) {
   const existingLabel = (obj.faceLabels && obj.faceLabels[chosenFace]) || null;
 
   overlay.innerHTML = `
-    <div class="modal" style="width:340px; background:var(--bg-1); border:1px solid var(--line); border-radius:12px; padding:20px;">
+    <div class="modal" style="width:340px; max-height:85vh; overflow-y:auto; background:var(--bg-1); border:1px solid var(--line); border-radius:12px; padding:20px;">
       <h3 style="font-size:15px; margin-bottom:4px;">Text on Face</h3>
       <p style="font-size:12px; color:var(--text-1); margin-bottom:14px; line-height:1.5;">Applies to <b style="color:var(--text-0)">${obj.name}</b>${obj.type !== 'box' ? ' — non-box meshes only support one texture, applied double-sided regardless of face chosen below.' : ''}</p>
 
@@ -3727,16 +3839,6 @@ function showTextFaceModal(obj) {
         <div class="seg-opt" data-value="fit" style="flex:1; text-align:center;">Fit (keep proportions)</div>
         <div class="seg-opt" data-value="stretch" style="flex:1; text-align:center;">Stretch (fill face)</div>
       </div>
-        <button type="button" id="tf-font-btn" class="font-picker-btn">
-          <span id="tf-font-btn-label" class="font-picker-btn-label">Inter</span>
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
-        </button>
-        <div id="tf-font-dropdown" class="font-picker-dropdown">
-          <input type="text" id="tf-font-search" class="font-picker-search" placeholder="Search fonts…" autocomplete="off">
-          <div id="tf-font-list" class="font-picker-list"></div>
-        </div>
-      </div>
-      <div id="tf-font-preview" style="width:100%; box-sizing:border-box; padding:12px 10px; margin-top:8px; margin-bottom:14px; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; color:var(--text-0); font-size:22px; line-height:1.2; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Preview</div>
 
       <div class="field-label" style="margin-bottom:6px; display:flex; justify-content:space-between;">
         <span>Text size</span>
@@ -4106,6 +4208,11 @@ function doExport(format, modelName, clipNameOverrides) {
       clone.material = Array.isArray(o.mesh.material) ? o.mesh.material.map(m => m.clone()) : o.mesh.material.clone();
     }
     clone.name = o.name;
+    // GLTFExporter serializes userData into each node's extras automatically.
+    // Game engines that import glTF (Unity, Unreal, Godot) can read
+    // node.extras.collision and skip collider generation for objects
+    // flagged non-solid, letting the player pass through in-game.
+    clone.userData = { ...clone.userData, collision: o.collision !== false };
     exportScene.add(clone);
   });
 
