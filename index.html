@@ -2790,7 +2790,11 @@ function refreshInspector() {
   // Delete
   document.getElementById('f-delete').addEventListener('click', () => { setSelection([o]); deleteSelected(); });
 
-  // Position/Rotation/Scale live inputs
+  // Position/Rotation/Scale live inputs.
+  // Rotation is special-cased for multi-selection: when more than one object is
+  // selected, dragging/typing a rotation field sets that axis to the SAME value
+  // (in radians) on every selected object, so the whole selection ends up with
+  // matching rotation instead of only the primary (last-clicked) object moving.
   const bindXYZ = (prefix, target, isRot=false) => {
     ['x','y','z'].forEach(axis => {
       const el = document.getElementById(`${prefix}-${axis}`);
@@ -2799,7 +2803,14 @@ function refreshInspector() {
         mark();
         const v = parseFloat(e.target.value);
         if (isNaN(v)) return;
-        target[axis] = isRot ? THREE.MathUtils.degToRad(v) : v;
+        if (isRot && selectedSet.size > 1) {
+          const rad = THREE.MathUtils.degToRad(v);
+          objects.forEach(obj => {
+            if (selectedSet.has(obj.id) && obj.mesh) obj.mesh.rotation[axis] = rad;
+          });
+        } else {
+          target[axis] = isRot ? THREE.MathUtils.degToRad(v) : v;
+        }
       });
     });
   };
@@ -2819,9 +2830,21 @@ function refreshInspector() {
     });
   }
 
+  // Same multi-selection treatment as rotation: with more than one object selected,
+  // a color change is applied to every selected object's material(s) — including
+  // each face of a multi-material object — so the whole selection shares one color
+  // instead of only the primary (last-clicked) object updating.
   function setColor(hexVal, mark) {
     if (mark) mark();
-    matList.forEach(m => m.color.set(hexVal));
+    if (selectedSet.size > 1) {
+      objects.forEach(obj => {
+        if (!selectedSet.has(obj.id) || !obj.mesh) return;
+        const ml = Array.isArray(obj.mesh.material) ? obj.mesh.material : [obj.mesh.material];
+        ml.forEach(m => m.color.set(hexVal));
+      });
+    } else {
+      matList.forEach(m => m.color.set(hexVal));
+    }
     document.getElementById('f-color').value = hexVal;
     document.getElementById('f-hex').value = hexVal;
     refreshOutliner();
