@@ -2131,7 +2131,9 @@ function attachGizmoToSelection() {
     multiProxy.scale.set(1,1,1);
     proxyChildOffsets = selObjs.map(o => ({
       obj: o,
-      relPos: o.mesh.position.clone().sub(center)
+      relPos: o.mesh.position.clone().sub(center),
+      relQuat: o.mesh.quaternion.clone(),
+      relScale: o.mesh.scale.clone()
     }));
     transformControls.attach(multiProxy);
   }
@@ -2405,9 +2407,21 @@ transformControls.addEventListener('objectChange', () => {
   const target = transformControls.object;
 
   if (target === multiProxy && proxyChildOffsets.length) {
-    proxyChildOffsets.forEach(({obj, relPos}) => {
+    proxyChildOffsets.forEach(({obj, relPos, relQuat, relScale}) => {
       const rotatedOffset = relPos.clone().applyEuler(multiProxy.rotation).multiply(multiProxy.scale);
       obj.mesh.position.copy(multiProxy.position).add(rotatedOffset);
+      // Spin each part's own orientation by the proxy's rotation too, not just its
+      // orbit position — otherwise parts swing around the pivot but stay facing
+      // their original way, which reads as "orbiting objects" instead of "one
+      // rigid model turning". Composing the proxy's quaternion with each part's
+      // captured starting quaternion keeps every part's relative facing intact.
+      if (relQuat) {
+        const proxyQuat = new THREE.Quaternion().setFromEuler(multiProxy.rotation);
+        obj.mesh.quaternion.copy(proxyQuat).multiply(relQuat);
+      }
+      if (relScale) {
+        obj.mesh.scale.copy(relScale).multiply(multiProxy.scale);
+      }
     });
   }
 
@@ -2791,10 +2805,15 @@ function refreshInspector() {
   document.getElementById('f-delete').addEventListener('click', () => { setSelection([o]); deleteSelected(); });
 
   // Position/Rotation/Scale live inputs.
-  // Rotation is special-cased for multi-selection: when more than one object is
-  // selected, dragging/typing a rotation field sets that axis to the SAME value
-  // (in radians) on every selected object, so the whole selection ends up with
-  // matching rotation instead of only the primary (last-clicked) object moving.
+  // Rotation is special-cased for multi-selection: rotating the group must behave
+  // like the gizmo does — pivot every selected object around the shared selection
+  // center AND spin each object's own orientation — not just set every object's
+  // local rotation to the same absolute value in place (which left symmetric parts
+  // looking unchanged at 180°, since nothing actually orbited the pivot).
+  // We track the last-applied absolute angle per axis (primary object's rotation
+  // when the panel was built) and apply only the DELTA each time the field changes,
+  // exactly like a gizmo drag would produce incrementally.
+  let lastRotDeg = { x: THREE.MathUtils.radToDeg(o.mesh.rotation.x), y: THREE.MathUtils.radToDeg(o.mesh.rotation.y), z: THREE.MathUtils.radToDeg(o.mesh.rotation.z) };
   const bindXYZ = (prefix, target, isRot=false) => {
     ['x','y','z'].forEach(axis => {
       const el = document.getElementById(`${prefix}-${axis}`);
@@ -2804,12 +2823,27 @@ function refreshInspector() {
         const v = parseFloat(e.target.value);
         if (isNaN(v)) return;
         if (isRot && selectedSet.size > 1) {
-          const rad = THREE.MathUtils.degToRad(v);
-          objects.forEach(obj => {
-            if (selectedSet.has(obj.id) && obj.mesh) obj.mesh.rotation[axis] = rad;
+          const deltaDeg = v - lastRotDeg[axis];
+          lastRotDeg[axis] = v;
+          if (Math.abs(deltaDeg) < 1e-9) return;
+          const deltaRad = THREE.MathUtils.degToRad(deltaDeg);
+          const selObjs = objects.filter(obj => selectedSet.has(obj.id) && obj.mesh);
+          const center = new THREE.Vector3();
+          selObjs.forEach(obj => center.add(obj.mesh.position));
+          center.divideScalar(selObjs.length);
+          const axisVec = axis === 'x' ? new THREE.Vector3(1,0,0) : axis === 'y' ? new THREE.Vector3(0,1,0) : new THREE.Vector3(0,0,1);
+          const deltaQuat = new THREE.Quaternion().setFromAxisAngle(axisVec, deltaRad);
+          selObjs.forEach(obj => {
+            const rel = obj.mesh.position.clone().sub(center);
+            rel.applyQuaternion(deltaQuat);
+            obj.mesh.position.copy(center).add(rel);
+            obj.mesh.quaternion.premultiply(deltaQuat);
           });
+          attachGizmoToSelection();
+        } else if (isRot) {
+          target[axis] = THREE.MathUtils.degToRad(v);
         } else {
-          target[axis] = isRot ? THREE.MathUtils.degToRad(v) : v;
+          target[axis] = v;
         }
       });
     });
