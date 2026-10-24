@@ -642,16 +642,21 @@
   .modal-actions{ display:flex; gap:8px; justify-content:flex-end; }
 
   /* ---------- Settings modal ---------- */
-  .modal.settings-modal{ width:420px; }
+  .modal.settings-modal{ width:600px; max-width:94vw; max-height:88vh; overflow-y:auto; }
+  .modal.settings-modal .modal-actions{ position:sticky; bottom:-22px; background:var(--bg-1); padding:12px 0 2px; margin-top:4px; border-top:1px solid var(--line); }
   .setting-row{
     display:flex; align-items:center; justify-content:space-between;
-    gap:14px; padding:12px 0;
+    gap:10px 18px; padding:12px 0; flex-wrap:wrap;
     border-bottom:1px solid var(--line);
   }
   .setting-row:last-of-type{ border-bottom:none; }
-  .setting-label{ display:flex; flex-direction:column; gap:2px; }
+  .seg-control{ flex-wrap:wrap; }
+  .anim-sel{ background:var(--bg-2); border:1px solid var(--line); color:var(--text-0); font-size:11px; border-radius:6px; padding:4px 6px; }
+  #anim-autokey{ width:auto; padding:0 9px; font-size:11px; font-weight:700; }
+  #anim-autokey.active{ color:#ff5c5c; background:rgba(255,92,92,.15); }
+  .setting-label{ display:flex; flex-direction:column; gap:2px; flex:1 1 260px; min-width:0; }
   .setting-label .st-name{ font-size:12.5px; font-weight:600; color:var(--text-0); }
-  .setting-label .st-desc{ font-size:11px; color:var(--text-2); line-height:1.4; max-width:260px; }
+  .setting-label .st-desc{ font-size:11px; color:var(--text-2); line-height:1.4; max-width:none; }
   .seg-control{
     display:flex; background:var(--bg-2); border:1px solid var(--line);
     border-radius:7px; padding:2px; flex-shrink:0;
@@ -1017,6 +1022,13 @@
         <div class="anim-btn" id="anim-loop" title="Loop playback">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
         </div>
+        <div class="anim-btn" id="anim-autokey" title="Auto-key: moving, rotating or resizing an object records a keyframe at the playhead">● Auto-key</div>
+        <select id="anim-ease" class="anim-sel" title="Easing for new keyframes (right-click a keyframe to change it)">
+          <option value="inout">Ease in-out</option><option value="linear">Linear</option><option value="in">Ease in</option><option value="out">Ease out</option><option value="hold">Hold (step)</option>
+        </select>
+        <select id="anim-speed" class="anim-sel" title="Playback speed">
+          <option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option>
+        </select>
         <div class="anim-time" id="anim-time-label">0.00s / 3.00s</div>
         <div class="anim-duration-field">
           <span>Duration</span>
@@ -1090,17 +1102,6 @@
       <div class="seg-control" id="resize-mode-control">
         <div class="seg-opt" data-value="symmetric">Symmetric</div>
         <div class="seg-opt active" data-value="one-sided">One-Sided</div>
-      </div>
-    </div>
-
-    <div class="setting-row">
-      <div class="setting-label">
-        <span class="st-name">Image texture mode</span>
-        <span class="st-desc">Normal stretches an uploaded image to fill the face, which can distort it on non-square faces. Tile repeats the image at its own aspect ratio instead, so it never stretches. Text on faces is unaffected — it's never stretched or tiled.</span>
-      </div>
-      <div class="seg-control" id="texture-mode-control">
-        <div class="seg-opt active" data-value="normal">Normal</div>
-        <div class="seg-opt" data-value="tile">Tile</div>
       </div>
     </div>
 
@@ -1584,6 +1585,7 @@ let snapEnabled = false;
 let scaleSnapAmount = 0.25;
 let resizeMode = 'one-sided'; // 'symmetric' | 'one-sided'
 let resizeNeighborSnapEnabled = true; // whether scaling near another object snaps flush against it
+let nextImageTile = false; // inspector toggle: tile the NEXT uploaded image (and shows current state)
 let textureMode = 'normal'; // 'normal' (stretch to fill face) | 'tile' (repeat at native aspect, never stretched)
 const undoStack = [];
 const redoStack = [];
@@ -1634,7 +1636,7 @@ function serializeMaterial(m) {
     opacity: m.opacity,
     emissive: '#' + m.emissive.getHexString(),
     emissiveIntensity: m.emissiveIntensity ?? 0,
-    mapImg: m.map ? textureToDataURL(m.map) : null
+    mapImg: m.map ? textureToDataURL(m.map) : null, mapTile: tileData(m.map)
   };
 }
 
@@ -1686,6 +1688,7 @@ function snapshotOneObject(o, useWorldTransform) {
       emissive: '#' + primary.emissive.getHexString(),
       emissiveIntensity: primary.emissiveIntensity ?? 0,
       mapImg: !isMulti && primary.map ? textureToDataURL(primary.map) : null,
+      mapTile: !isMulti ? tileData(primary.map) : null,
       faceMaterials: isMulti ? o.mesh.material.map(serializeMaterial) : null,
       faceLabels: o.faceLabels ? { ...o.faceLabels } : null,
       animClips: o.animClips ? JSON.parse(JSON.stringify(o.animClips)) : null
@@ -1819,7 +1822,7 @@ function restoreScene(snap) {
           (tex) => {
             tex.colorSpace = THREE.SRGBColorSpace;
             tex.isTextTexture = isText;
-            if (!isText) applyTextureModeToTexture(tex, faceWorldSize({ mesh }, faceName));
+            if (!isText) { tex.userData.tile = !!fm.mapTile; if (fm.mapTile && fm.mapTile.w > 0) tex.userData.tileSize = { w: fm.mapTile.w, h: fm.mapTile.h }; applyTextureModeToTexture(tex, faceWorldSize({ mesh }, faceName)); }
             mats[i].map = tex; mats[i].needsUpdate = true;
           },
           undefined,
@@ -1843,6 +1846,7 @@ function restoreScene(snap) {
             tex.colorSpace = THREE.SRGBColorSpace;
             const box = new THREE.Box3().setFromObject(mesh);
             const size = box.getSize(new THREE.Vector3());
+            tex.userData.tile = !!s.mapTile; if (s.mapTile && s.mapTile.w > 0) tex.userData.tileSize = { w: s.mapTile.w, h: s.mapTile.h };
             applyTextureModeToTexture(tex, { w: size.x || 1, h: size.y || 1 });
             mat.map = tex; mat.needsUpdate = true;
           },
@@ -3007,6 +3011,12 @@ function refreshInspector() {
         </button>
         ${(!Array.isArray(o.mesh.material) && primaryMat.map) ? '<div class="del-btn" id="f-tex-clear" title="Remove texture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></div>' : ''}
       </div>
+      <div class="color-row" style="margin-top:6px; align-items:center; gap:8px;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:11.5px; cursor:pointer; flex:1;" title="On: the image keeps its size and repeats as you resize the object. Off: it stretches to fill.">
+          <input type="checkbox" id="f-tile-toggle" ${(matList.some(m=>m.map&&m.map.userData&&m.map.userData.tile) || (!matList.some(m=>m.map) && nextImageTile)) ? 'checked' : ''}> Tile image (repeat, don't stretch)
+        </label>
+        <input type="number" id="f-tile-size" class="scale-snap-input" title="Width of one tile (units)" min="0.05" step="0.05" value="${(()=>{const t=matList.map(m=>m.map).find(t=>t&&t.userData&&t.userData.tileSize); return t?t.userData.tileSize.w.toFixed(2):'1.00';})()}" style="display:${matList.some(m=>m.map&&m.map.userData&&m.map.userData.tile)?'':'none'}">
+      </div>
       <input type="file" id="f-tex-input" accept="image/*" style="display:none">
 
       <div class="field-label">Collision</div>
@@ -3220,6 +3230,7 @@ function refreshInspector() {
       const dataUrl = fr.result;
       new THREE.TextureLoader().load(dataUrl, (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
+        tex.userData.tile = nextImageTile;
         pushUndo();
         const box = new THREE.Box3().setFromObject(o.mesh);
         const size = box.getSize(new THREE.Vector3());
@@ -3236,6 +3247,20 @@ function refreshInspector() {
       });
     };
     fr.readAsDataURL(file);
+  });
+  const tileToggle = document.getElementById('f-tile-toggle'), tileSizeEl = document.getElementById('f-tile-size');
+  tileToggle.addEventListener('change', () => {
+    nextImageTile = tileToggle.checked;
+    if (!matList.some(m => m.map)) return; // no image yet: just sets the default for the next upload
+    pushUndo();
+    matList.forEach(m => { if (m.map && !m.map.isTextTexture) { m.map.userData.tile = nextImageTile; m.map.userData.tileSize = undefined; } });
+    refreshTiles(o); refreshInspector();
+  });
+  tileSizeEl.addEventListener('change', () => {
+    const w = parseFloat(tileSizeEl.value); if (!(w > 0)) return;
+    pushUndo();
+    matList.forEach(m => { const t = m.map; if (t && t.userData.tile && t.image) t.userData.tileSize = { w, h: w / (t.image.width / t.image.height) }; });
+    refreshTiles(o);
   });
   const clearBtn = document.getElementById('f-tex-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => {
@@ -3699,16 +3724,6 @@ document.getElementById('resize-neighbor-snap-control').querySelectorAll('.seg-o
 // Image texture mode: Normal (stretch to fill) vs Tile (repeat at native aspect, never stretched).
 // Only affects image textures (whole-object upload and face image upload) — text-on-face textures
 // are rendered at the face's own aspect ratio in renderTextTexture, so they're excluded on purpose.
-const textureModeControl = document.getElementById('texture-mode-control');
-textureModeControl.querySelectorAll('.seg-opt').forEach(opt => {
-  opt.addEventListener('click', () => {
-    textureModeControl.querySelectorAll('.seg-opt').forEach(o => o.classList.remove('active'));
-    opt.classList.add('active');
-    textureMode = opt.dataset.value;
-    reapplyTextureModeToAllImageTextures();
-    showToast(textureMode === 'tile' ? 'Image texture mode: Tile' : 'Image texture mode: Normal');
-  });
-});
 
 // Returns the world-space width/height of a face for a given box-like object, used to compute
 // tiling repeat counts and aspect. Falls back to the object's overall footprint for non-box types
@@ -3739,43 +3754,48 @@ function faceAspectRatio(obj, face) {
 // fill (repeat reset to 1,1), matching the old default behavior.
 function applyTextureModeToTexture(tex, faceSize) {
   if (!tex) return;
-  if (textureMode === 'tile' && tex.image && tex.image.width && tex.image.height && faceSize && faceSize.w > 1e-6 && faceSize.h > 1e-6) {
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    const texAspect = tex.image.width / tex.image.height; // width/height of the source image
-    // Fit one tile at its true aspect ratio inside the face — try filling the full face width
-    // first; if that would make the tile taller than the face, fit by height instead. Either
-    // way the tile's own w:h ratio is preserved, so it's never stretched.
-    let tileW = faceSize.w;
-    let tileH = tileW / texAspect;
-    if (tileH > faceSize.h) {
-      tileH = faceSize.h;
-      tileW = tileH * texAspect;
+  const ud = tex.userData || (tex.userData = {});
+  const ok = faceSize && faceSize.w > 1e-6 && faceSize.h > 1e-6 && tex.image && tex.image.width && tex.image.height;
+  const wrap = (ud.tile && ok) ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  if (tex.wrapS !== wrap) { tex.wrapS = tex.wrapT = wrap; tex.needsUpdate = true; }
+  if (ud.tile && ok) {
+    // Tile size is fixed in world units the first time (one image fitted to the face at its
+    // native aspect). After that, resizing the object only changes how MANY tiles fit.
+    if (!ud.tileSize || !(ud.tileSize.w > 0)) {
+      const aspect = tex.image.width / tex.image.height;
+      let w = faceSize.w, h = w / aspect;
+      if (h > faceSize.h) { h = faceSize.h; w = h * aspect; }
+      ud.tileSize = { w, h };
     }
-    tex.repeat.set(faceSize.w / tileW, faceSize.h / tileH);
-    tex.needsUpdate = true;
+    tex.repeat.set(faceSize.w / ud.tileSize.w, faceSize.h / ud.tileSize.h);
   } else {
-    tex.wrapS = THREE.ClampToEdgeWrapping;
-    tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.repeat.set(1, 1);
-    tex.needsUpdate = true;
   }
 }
-
-// Re-applies the current texture mode to every image texture currently in the scene (whole-object
-// skins and per-face image textures). Called whenever the global Tile/Normal setting changes.
-function reapplyTextureModeToAllImageTextures() {
-  objects.forEach(obj => {
-    const mats = Array.isArray(obj.mesh.material) ? obj.mesh.material : [obj.mesh.material];
-    mats.forEach((m, i) => {
-      if (!m.map || m.map.isTextTexture) return;
-      const face = Array.isArray(obj.mesh.material) ? FACE_ORDER[i] : null;
-      applyTextureModeToTexture(m.map, face ? faceWorldSize(obj, face) : (() => {
-        const box = new THREE.Box3().setFromObject(obj.mesh);
-        const size = box.getSize(new THREE.Vector3());
-        return { w: size.x || 1, h: size.y || 1 };
-      })());
-    });
+function tileData(map) { return (map && map.userData && map.userData.tile) ? (map.userData.tileSize || { w: 0, h: 0 }) : null; }
+function tileFaceSize(obj, i, isArr) {
+  if (isArr) return faceWorldSize(obj, FACE_ORDER[i]);
+  const sz = new THREE.Box3().setFromObject(obj.mesh).getSize(new THREE.Vector3());
+  return { w: sz.x || 1, h: sz.y || 1 };
+}
+function refreshTiles(obj) {
+  if (!obj.mesh || !obj.mesh.material) return;
+  const isArr = Array.isArray(obj.mesh.material);
+  (isArr ? obj.mesh.material : [obj.mesh.material]).forEach((m, i) => {
+    if (m.map && !m.map.isTextTexture) applyTextureModeToTexture(m.map, tileFaceSize(obj, i, isArr));
+  });
+}
+function reapplyTextureModeToAllImageTextures() { objects.forEach(refreshTiles); }
+// Runs every frame: when a tiled object's scale changes (gizmo, inspector, undo, animation),
+// recompute how many copies fit. Cheap — skipped unless the scale actually changed.
+function updateTiledTextures() {
+  objects.forEach(o => {
+    const m = o.mesh; if (!m || !m.material) return;
+    const mats = Array.isArray(m.material) ? m.material : [m.material];
+    if (!mats.some(x => x.map && x.map.userData && x.map.userData.tile)) return;
+    const k = m.scale.x + ',' + m.scale.y + ',' + m.scale.z;
+    if (o.__tileKey === k) return;
+    o.__tileKey = k; refreshTiles(o);
   });
 }
 
@@ -5495,6 +5515,8 @@ toggleEditMode = function() {
 // ==================================================================
 
 const DEFAULT_CLIP_ID = 'clip_1';
+const EASES = { linear: f => f, inout: f => f < .5 ? 2*f*f : 1 - Math.pow(-2*f + 2, 2) / 2, in: f => f*f, out: f => 1 - (1-f)*(1-f), hold: f => f >= 1 ? 1 : 0 };
+function easeF(a, f) { return (EASES[a.ease] || EASES.linear)(f); }
 
 const anim = {
   active: false,
@@ -5503,6 +5525,7 @@ const anim = {
   duration: 3,         // seconds, active clip's duration (mirrors anim.clips[activeClipId].duration)
   lastFrameAt: 0,
   loop: true,
+  autoKey: false, speed: 1, defaultEase: 'inout',
   clips: [ { id: DEFAULT_CLIP_ID, name: 'Animation', duration: 3 } ],
   activeClipId: DEFAULT_CLIP_ID,
 };
@@ -5668,6 +5691,27 @@ function deleteActiveClip() {
 }
 document.getElementById('anim-clip-delete').addEventListener('click', deleteActiveClip);
 
+function keyTracks(tr, t, p, q, s) {
+  const ease = anim.defaultEase;
+  upsertKey(tr.pos, { t, x: p.x, y: p.y, z: p.z, ease });
+  upsertKey(tr.rot, { t, x: q.x, y: q.y, z: q.z, w: q.w, ease });
+  upsertKey(tr.scale, { t, x: s.x, y: s.y, z: s.z, ease });
+}
+function setKeyEase(obj, t, ease) {
+  pushUndo();
+  const tr = obj.animClips && obj.animClips[anim.activeClipId];
+  if (tr) ['pos', 'rot', 'scale'].forEach(tn => tr[tn].forEach(k => { if (Math.abs(k.t - t) < 0.005) k.ease = ease; }));
+  applyAnimAtTime(anim.time);
+  showToast('Keyframe easing: ' + ease);
+}
+// Auto-key: record a keyframe for everything selected when a gizmo drag finishes.
+transformControls.addEventListener('dragging-changed', (ev) => {
+  if (!anim.active || !anim.autoKey) return;
+  const sel = [...selectedSet].map(id => objects.find(o => o.id === id)).filter(o => o && o.type !== 'group' && o.mesh);
+  if (ev.value) { sel.forEach(ensureAnimBasePose); return; }
+  sel.forEach(o => { const tr = ensureClipTracks(o, anim.activeClipId); keyTracks(tr, anim.time, o.mesh.position, o.mesh.quaternion, o.mesh.scale); });
+  refreshAnimTrackList();
+});
 function addKeyframeForSelected() {
   if (!anim.active) { showToast('Enter Animation Mode first', true); return; }
   if (!selected) { showToast('Select an object to keyframe', true); return; }
@@ -5677,9 +5721,7 @@ function addKeyframeForSelected() {
   const tr = ensureClipTracks(o, anim.activeClipId);
   const t = anim.time;
   const p = o.mesh.position, q = o.mesh.quaternion, s = o.mesh.scale;
-  upsertKey(tr.pos, { t, x: p.x, y: p.y, z: p.z });
-  upsertKey(tr.rot, { t, x: q.x, y: q.y, z: q.z, w: q.w });
-  upsertKey(tr.scale, { t, x: s.x, y: s.y, z: s.z });
+  keyTracks(tr, t, p, q, s);
   refreshAnimTrackList();
   showToast(`Keyframe added at ${t.toFixed(2)}s for ${o.name} (${getActiveClipMeta().name})`);
 }
@@ -5763,6 +5805,7 @@ function openKfContextMenu(clientX, clientY, obj, t) {
 
   menu.appendChild(mkItem('Copy keyframe', false, () => copyKeyframe(obj, t)));
   menu.appendChild(mkItem('Paste keyframe here', !keyframeClipboard, () => pasteKeyframe(obj, t)));
+  [['inout','Ease in-out'],['linear','Linear'],['in','Ease in'],['out','Ease out'],['hold','Hold (step)']].forEach(([k, l]) => menu.appendChild(mkItem('Easing: ' + l, false, () => setKeyEase(obj, t, k))));
   menu.appendChild(mkItem('Delete keyframe', false, () => removeKeyframe(obj, null, t)));
 
   document.body.appendChild(menu);
@@ -5825,7 +5868,7 @@ function sampleVecTrack(keys, t) {
   for (let i = 0; i < keys.length - 1; i++) {
     const a = keys[i], b = keys[i + 1];
     if (t >= a.t && t <= b.t) {
-      const f = (b.t - a.t) < 1e-6 ? 0 : (t - a.t) / (b.t - a.t);
+      const f = easeF(a, (b.t - a.t) < 1e-6 ? 0 : (t - a.t) / (b.t - a.t));
       return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, z: a.z + (b.z - a.z) * f };
     }
   }
@@ -5923,6 +5966,10 @@ document.getElementById('anim-stop').addEventListener('click', () => {
   setAnimTime(0);
 });
 
+const animAutoKeyBtn = document.getElementById('anim-autokey');
+animAutoKeyBtn.addEventListener('click', () => { anim.autoKey = !anim.autoKey; animAutoKeyBtn.classList.toggle('active', anim.autoKey); showToast(anim.autoKey ? 'Auto-key on: transform an object to record' : 'Auto-key off'); });
+document.getElementById('anim-ease').addEventListener('change', (e) => { anim.defaultEase = e.target.value; });
+document.getElementById('anim-speed').addEventListener('change', (e) => { anim.speed = parseFloat(e.target.value) || 1; });
 const animLoopBtn = document.getElementById('anim-loop');
 animLoopBtn.classList.toggle('active', anim.loop);
 animLoopBtn.addEventListener('click', () => {
@@ -6022,6 +6069,22 @@ window.addEventListener('keydown', (e) => {
 // `clipNameOverrides` is an optional { [clipId]: exportName } map from the export
 // dialog, so the person can name each animation on the way out without renaming
 // their in-editor clips.
+// Easing can't be stored in a GLB's linear tracks, so eased segments are sampled into extra keys.
+function bakeKeys(keys, isQuat) {
+  if (keys.length < 2 || !keys.some(k => k.ease && k.ease !== 'linear')) return keys;
+  const out = [];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i], b = keys[i + 1];
+    out.push(a);
+    if (a.ease === 'hold') { if (b.t - a.t > 0.002) out.push({ ...a, t: b.t - 0.001 }); continue; }
+    if (a.ease && a.ease !== 'linear') for (let n = 1; n < 12; n++) {
+      const t = a.t + (b.t - a.t) * n / 12, v = isQuat ? sampleQuatTrack(keys, t) : sampleVecTrack(keys, t);
+      out.push({ t, x: v.x, y: v.y, z: v.z, w: v.w });
+    }
+  }
+  out.push(keys[keys.length - 1]);
+  return out;
+}
 function buildAnimationClips(exportScene, sourceObjects, clipNameOverrides) {
   const clips = [];
   anim.clips.forEach(clipMeta => {
@@ -6033,18 +6096,18 @@ function buildAnimationClips(exportScene, sourceObjects, clipNameOverrides) {
       if (!hasKeys) return;
       const targetName = exportScene.children[i].name; // clone name matches o.name (1:1 order)
       if (tr.pos.length) {
-        const times = tr.pos.map(k => k.t);
-        const values = tr.pos.flatMap(k => [k.x, k.y, k.z]);
+        const times = bakeKeys(tr.pos,false).map(k => k.t);
+        const values = bakeKeys(tr.pos,false).flatMap(k => [k.x, k.y, k.z]);
         tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.position`, times, values));
       }
       if (tr.rot.length) {
-        const times = tr.rot.map(k => k.t);
-        const values = tr.rot.flatMap(k => [k.x, k.y, k.z, k.w]);
+        const times = bakeKeys(tr.rot,true).map(k => k.t);
+        const values = bakeKeys(tr.rot,true).flatMap(k => [k.x, k.y, k.z, k.w]);
         tracks.push(new THREE.QuaternionKeyframeTrack(`${targetName}.quaternion`, times, values));
       }
       if (tr.scale.length) {
-        const times = tr.scale.map(k => k.t);
-        const values = tr.scale.flatMap(k => [k.x, k.y, k.z]);
+        const times = bakeKeys(tr.scale,false).map(k => k.t);
+        const values = bakeKeys(tr.scale,false).flatMap(k => [k.x, k.y, k.z]);
         tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.scale`, times, values));
       }
     });
@@ -6069,13 +6132,14 @@ function animate() {
   requestAnimationFrame(animate);
   orbit.update();
   updateResizeHandles();
+  updateTiledTextures();
   selectionOutlines.forEach(helper => helper.update());
 
   if (anim.active && anim.playing) {
     const now = performance.now();
     const dt = (now - anim.lastFrameAt) / 1000;
     anim.lastFrameAt = now;
-    anim.time += dt;
+    anim.time += dt * (anim.speed || 1);
     if (anim.time >= anim.duration) {
       if (anim.loop) {
         anim.time = anim.time % anim.duration;
