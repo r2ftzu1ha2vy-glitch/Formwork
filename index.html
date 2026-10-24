@@ -1088,8 +1088,8 @@
         <span class="st-desc">Symmetric grows/shrinks from the center, both sides move. One-sided keeps the opposite face fixed, like Roblox.</span>
       </div>
       <div class="seg-control" id="resize-mode-control">
-        <div class="seg-opt active" data-value="symmetric">Symmetric</div>
-        <div class="seg-opt" data-value="one-sided">One-Sided</div>
+        <div class="seg-opt" data-value="symmetric">Symmetric</div>
+        <div class="seg-opt active" data-value="one-sided">One-Sided</div>
       </div>
     </div>
 
@@ -1132,6 +1132,38 @@
         <span class="st-desc">When "Snap to grid" (bottom bar) is enabled, scaling an object jumps in steps of this size instead of moving smoothly. Lower values (e.g. 0.1) give finer control; higher values (e.g. 0.5) snap in bigger jumps.</span>
       </div>
       <input type="number" id="scale-snap-input" class="scale-snap-input" value="0.25" min="0.01" max="5" step="0.01">
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="st-name">Paste / duplicate in place</span>
+        <span class="st-desc">On: Ctrl+C / Ctrl+V and Duplicate drop the copy at exactly the same position as the original (e.g. 10,10,10 stays 10,10,10). Off: the copy is nudged aside.</span>
+      </div>
+      <div class="seg-control" id="paste-inplace-control">
+        <div class="seg-opt" data-value="on">On</div>
+        <div class="seg-opt active" data-value="off">Off</div>
+      </div>
+    </div>
+
+    <div class="setting-row" style="flex-direction:column; align-items:stretch; gap:10px;">
+      <div class="setting-label">
+        <span class="st-name">Gizmo theme</span>
+        <span class="st-desc">Colors of the move arrows, rotate rings and resize handles. Pick a preset or set your own.</span>
+      </div>
+      <div class="seg-control" id="gizmo-preset-control" style="flex-wrap:wrap;">
+        <div class="seg-opt" data-value="default">Default</div>
+        <div class="seg-opt" data-value="neon">Neon</div>
+        <div class="seg-opt" data-value="sunset">Sunset</div>
+        <div class="seg-opt" data-value="ocean">Ocean</div>
+        <div class="seg-opt" data-value="mono">Mono</div>
+      </div>
+      <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap; font-size:12px;">
+        <label>X <input type="color" id="gz-x"></label>
+        <label>Y <input type="color" id="gz-y"></label>
+        <label>Z <input type="color" id="gz-z"></label>
+        <label>Rotate <input type="color" id="gz-rot"></label>
+        <label>Size <input type="range" id="gizmo-size-input" min="0.5" max="2.5" step="0.1" value="1" style="width:90px; vertical-align:middle;"></label>
+      </div>
     </div>
 
     <div class="modal-actions">
@@ -1320,7 +1352,7 @@ transformControls.addEventListener('dragging-changed', (e) => {
 // the right and keeps the left face fixed; dragging -X/left grows from the left and keeps the
 // right face fixed — same idea for Y/up-down and Z/front-back).
 function applyOneSidedResize(target) {
-  if (resizeMode !== 'one-sided' || !oneSidedPrevBox || !oneSidedPrevScale) return;
+  if (rg.dragging || resizeMode !== 'one-sided' || !oneSidedPrevBox || !oneSidedPrevScale) return;
   if (!oneSidedPinFace) oneSidedPinFace = {};
   const newBox = new THREE.Box3().setFromObject(target);
   ['x','y','z'].forEach(axis => {
@@ -1361,6 +1393,188 @@ function applyOneSidedResize(target) {
 }
 
 
+// ---------------- GIZMO THEME + FACE-HANDLE RESIZE + PASTE-IN-PLACE ----------------
+const GIZMO_PRESETS = {
+  default: { x:'#e8636b', y:'#5ec98f', z:'#5b9dd9', rot:'#f2c94c' },
+  neon:    { x:'#ff2d95', y:'#39ff14', z:'#00e5ff', rot:'#fff700' },
+  sunset:  { x:'#ff5e5b', y:'#ffb347', z:'#c77dff', rot:'#ffd6a5' },
+  ocean:   { x:'#4cc9f0', y:'#4895ef', z:'#80ffdb', rot:'#b8f2e6' },
+  mono:    { x:'#e0e0e0', y:'#b0b0b0', z:'#808080', rot:'#ffffff' }
+};
+const GIZMO_KEY = 'formwork-gizmo-settings';
+let gizmoTheme = { ...GIZMO_PRESETS.default };
+let gizmoPreset = 'default';
+let gizmoSize = 1;
+let pasteInPlace = false; // when true, copy/paste + duplicate land exactly on the original's position
+try {
+  const s = JSON.parse(localStorage.getItem(GIZMO_KEY) || 'null');
+  if (s) { gizmoTheme = { ...gizmoTheme, ...(s.theme || {}) }; gizmoPreset = s.preset || 'custom'; gizmoSize = s.size || 1; pasteInPlace = !!s.pasteInPlace; }
+} catch (err) { /* ignore */ }
+function pasteOffset() { return pasteInPlace ? new THREE.Vector3(0, 0, 0) : new THREE.Vector3(0.6, 0, 0.6); }
+
+// Face handles: one per side (+X/-X/+Y/-Y/+Z/-Z) in the object's own axes. Grab a side and
+// THAT side moves while the opposite one stays put. Hold Alt to grow from the center.
+const resizeHandleGroup = new THREE.Group();
+resizeHandleGroup.visible = false;
+scene.add(resizeHandleGroup);
+const resizeHandles = [];
+[['x',1],['x',-1],['y',1],['y',-1],['z',1],['z',-1]].forEach(([axis, sign]) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: gizmoTheme[axis], depthTest: false, transparent: true, opacity: 0.95 }));
+  m.renderOrder = 1000;
+  m.userData = { axis, sign };
+  resizeHandleGroup.add(m);
+  resizeHandles.push(m);
+});
+const rg = { dragging: false, hover: null, h: null, justDragged: false };
+
+function applyGizmoTheme() {
+  const map = { X:'x', Y:'y', Z:'z', XY:'z', YZ:'x', XZ:'y', E:'rot' };
+  const helper = transformControls.getHelper ? transformControls.getHelper() : transformControls;
+  helper.traverse(o => {
+    const k = map[o.name];
+    if (!k || !o.material || !o.material.color) return;
+    o.material.color.set(gizmoTheme[k]);
+    if (o.material._color) o.material._color.set(gizmoTheme[k]); else o.material._color = new THREE.Color(gizmoTheme[k]);
+  });
+  transformControls.setSize(gizmoSize);
+}
+function saveGizmoSettings() {
+  try { localStorage.setItem(GIZMO_KEY, JSON.stringify({ theme: gizmoTheme, preset: gizmoPreset, size: gizmoSize, pasteInPlace })); } catch (err) { /* ignore */ }
+}
+
+function resizeTarget() {
+  const t = transformControls.object;
+  if (transformControls.mode !== 'scale' || !t || !t.isMesh || !t.geometry) return null;
+  if (editMode.active || !objects.some(o => o.mesh === t)) return null;
+  return t;
+}
+function updateResizeHandles() {
+  const t = resizeTarget();
+  const on = !!t;
+  // Hide the stock single-axis scale arrows while our face handles are active (the center
+  // cube for uniform scaling stays).
+  transformControls.showX = transformControls.showY = transformControls.showZ = !on;
+  resizeHandleGroup.visible = on;
+  if (!on) { rg.hover = null; return; }
+  const bb = t.geometry.boundingBox || (t.geometry.computeBoundingBox(), t.geometry.boundingBox);
+  const c = bb.getCenter(new THREE.Vector3());
+  const white = new THREE.Color('#ffffff');
+  resizeHandles.forEach(h => {
+    const { axis, sign } = h.userData;
+    const p = c.clone(); p[axis] = sign > 0 ? bb.max[axis] : bb.min[axis];
+    t.localToWorld(p);
+    h.position.copy(p);
+    const hot = h === rg.hover || h === rg.h;
+    h.scale.setScalar(camera.position.distanceTo(p) * 0.028 * gizmoSize * (hot ? 1.3 : 1));
+    h.material.color.set(gizmoTheme[axis]).lerp(white, hot ? 0.55 : 0);
+  });
+}
+
+const AXIS_IDX = { x: 0, y: 1, z: 2 };
+const _rc = new THREE.Raycaster(), _ndc = new THREE.Vector2();
+function rgRay(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  _ndc.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  _rc.setFromCamera(_ndc, camera);
+  return _rc.ray;
+}
+// Position along the axis line (origin + t*dir) closest to the mouse ray
+function axisParam(ray, origin, dir) {
+  const w = origin.clone().sub(ray.origin);
+  const b = dir.dot(ray.direction), d = dir.dot(w), e = ray.direction.dot(w);
+  const den = 1 - b * b;
+  return den < 1e-6 ? 0 : (b * e - d) / den;
+}
+
+window.addEventListener('pointerdown', (e) => {
+  if (e.target !== renderer.domElement || e.button !== 0) return;
+  const t = resizeTarget(); if (!t) return;
+  const ray = rgRay(e);
+  const hit = _rc.intersectObjects(resizeHandles, false)[0];
+  if (!hit) return;
+  e.stopPropagation(); e.preventDefault();
+  const { axis, sign } = hit.object.userData;
+  const bb = t.geometry.boundingBox;
+  t.updateMatrixWorld(true);
+  const col = new THREE.Vector3().setFromMatrixColumn(t.matrixWorld, AXIS_IDX[axis]);
+  const worldScale = col.length();
+  const dir = col.clone().normalize();
+  const center = bb.getCenter(new THREE.Vector3());
+  const sym = resizeMode === 'symmetric' || e.altKey;
+  const pinLocal = center.clone();
+  if (!sym) pinLocal[axis] = sign > 0 ? bb.min[axis] : bb.max[axis];
+  const pinWorld = t.localToWorld(pinLocal.clone());
+  const L0 = (bb.max[axis] - bb.min[axis]) * worldScale;
+  const t0 = axisParam(ray, pinWorld, dir);
+  Object.assign(rg, {
+    dragging: true, h: hit.object, t, axis, sign, dir, pinLocal, pinWorld, sym, L0,
+    startScale: t.scale[axis], grab: sign * t0 - (sym ? L0 / 2 : L0)
+  });
+  transformControls.dispatchEvent({ type: 'dragging-changed', value: true }); // undo snapshot + orbit off
+  renderer.domElement.style.cursor = 'grabbing';
+}, true);
+
+window.addEventListener('pointermove', (e) => {
+  if (rg.dragging) {
+    e.stopPropagation();
+    const ray = rgRay(e), t = rg.t, axis = rg.axis;
+    const dist = rg.sign * axisParam(ray, rg.pinWorld, rg.dir) - rg.grab;
+    const newL = rg.sym ? dist * 2 : dist;
+    let ns = rg.startScale * newL / rg.L0;
+    if (snapEnabled && scaleSnapAmount > 0) ns = Math.round(ns / scaleSnapAmount) * scaleSnapAmount;
+    t.scale[axis] = Math.max(0.01, ns);
+    if (!rg.sym) {
+      t.updateMatrixWorld(true);
+      const delta = rg.pinWorld.clone().sub(t.localToWorld(rg.pinLocal.clone()));
+      const wp = t.getWorldPosition(new THREE.Vector3()).add(delta);
+      t.parent.worldToLocal(wp);
+      t.position.copy(wp);
+    }
+    transformControls.dispatchEvent({ type: 'objectChange' });
+    return;
+  }
+  if (e.target !== renderer.domElement || !resizeTarget()) { rg.hover = null; return; }
+  rgRay(e);
+  const hit = _rc.intersectObjects(resizeHandles, false)[0];
+  rg.hover = hit ? hit.object : null;
+  renderer.domElement.style.cursor = hit ? 'pointer' : '';
+}, true);
+
+window.addEventListener('pointerup', (e) => {
+  if (!rg.dragging) return;
+  e.stopPropagation();
+  rg.dragging = false; rg.h = null; rg.justDragged = true;
+  setTimeout(() => { rg.justDragged = false; }, 60);
+  transformControls.dispatchEvent({ type: 'dragging-changed', value: false });
+  renderer.domElement.style.cursor = '';
+}, true);
+window.addEventListener('click', (e) => { if (rg.justDragged) { e.stopPropagation(); e.preventDefault(); } }, true);
+
+// ---- Settings UI wiring ----
+function syncGizmoUI() {
+  document.querySelectorAll('#gizmo-preset-control .seg-opt').forEach(o => o.classList.toggle('active', o.dataset.value === gizmoPreset));
+  ['x','y','z','rot'].forEach(k => { const i = document.getElementById('gz-' + k); if (i) i.value = gizmoTheme[k]; });
+  document.getElementById('gizmo-size-input').value = gizmoSize;
+  document.querySelectorAll('#paste-inplace-control .seg-opt').forEach(o => o.classList.toggle('active', (o.dataset.value === 'on') === pasteInPlace));
+}
+document.querySelectorAll('#gizmo-preset-control .seg-opt').forEach(opt => opt.addEventListener('click', () => {
+  gizmoPreset = opt.dataset.value; gizmoTheme = { ...GIZMO_PRESETS[gizmoPreset] };
+  applyGizmoTheme(); syncGizmoUI(); saveGizmoSettings();
+}));
+['x','y','z','rot'].forEach(k => document.getElementById('gz-' + k).addEventListener('input', (e) => {
+  gizmoTheme[k] = e.target.value; gizmoPreset = 'custom';
+  document.querySelectorAll('#gizmo-preset-control .seg-opt').forEach(o => o.classList.remove('active'));
+  applyGizmoTheme(); saveGizmoSettings();
+}));
+document.getElementById('gizmo-size-input').addEventListener('input', (e) => {
+  gizmoSize = parseFloat(e.target.value) || 1; applyGizmoTheme(); saveGizmoSettings();
+});
+document.querySelectorAll('#paste-inplace-control .seg-opt').forEach(opt => opt.addEventListener('click', () => {
+  pasteInPlace = opt.dataset.value === 'on'; syncGizmoUI(); saveGizmoSettings();
+  showToast(pasteInPlace ? 'Paste/duplicate in place: On' : 'Paste/duplicate in place: Off');
+}));
+applyGizmoTheme(); syncGizmoUI();
+
 // ---------------- STATE ----------------
 let objects = [];      // {id, mesh, name, type, outline}
 let selected = null;   // primary selection (drives inspector + gizmo)
@@ -1368,7 +1582,7 @@ let selectedSet = new Set(); // ids of all selected objects (multi-select)
 let idCounter = 1;
 let snapEnabled = false;
 let scaleSnapAmount = 0.25;
-let resizeMode = 'symmetric'; // 'symmetric' | 'one-sided'
+let resizeMode = 'one-sided'; // 'symmetric' | 'one-sided'
 let resizeNeighborSnapEnabled = true; // whether scaling near another object snaps flush against it
 let textureMode = 'normal'; // 'normal' (stretch to fill face) | 'tile' (repeat at native aspect, never stretched)
 const undoStack = [];
@@ -1927,7 +2141,7 @@ function duplicateObject(obj) {
   data.pos = worldPos;
   data.rot = new THREE.Euler().setFromQuaternion(worldQuat, obj.mesh.rotation.order);
   data.scale = worldScale;
-  const pos = worldPos.clone().add(new THREE.Vector3(0.6, 0, 0.6));
+  const pos = worldPos.clone().add(pasteOffset());
   return createObjectFromClone(data, pos);
 }
 
@@ -2006,7 +2220,7 @@ function copySelected() {
 function pasteClipboard() {
   if (clipboard.length === 0) return;
   pushUndo();
-  const offset = new THREE.Vector3(0.6, 0, 0.6);
+  const offset = pasteOffset();
   const newTopLevel = [];
   const nextClipboard = [];
 
@@ -2492,7 +2706,7 @@ transformControls.addEventListener('objectChange', () => {
           }
         });
       }
-    } else if (transformControls.mode === 'scale' && target !== multiProxy && resizeMode !== 'one-sided' && resizeNeighborSnapEnabled) {
+    } else if (transformControls.mode === 'scale' && target !== multiProxy && resizeMode !== 'one-sided' && resizeNeighborSnapEnabled && !rg.dragging) {
       // Edge-to-neighbor snapping during resize only makes sense in Symmetric mode. In
       // One-Sided mode, applyOneSidedResize below already pins the opposite face itself —
       // running both would fight over mesh.position on the same tick and read as random
@@ -5854,6 +6068,7 @@ window.addEventListener('resize', onResize);
 function animate() {
   requestAnimationFrame(animate);
   orbit.update();
+  updateResizeHandles();
   selectionOutlines.forEach(helper => helper.update());
 
   if (anim.active && anim.playing) {
