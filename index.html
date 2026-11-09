@@ -3647,6 +3647,104 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 });
 
 // ---------------- IMPORT ----------------
+// ---------------- IMPORTED ANIMATION BAKING ----------------
+// glTF animations drive NODES (possibly parents of the meshes), but the editor stores
+// keyframes per object in world space. For every clip we find the meshes whose own node
+// or any ancestor is animated, sample the file's animation with an AnimationMixer at each
+// keyframe time, and record the resulting world position/rotation/scale as editor keys.
+// Returns the number of clips added.
+function bakeImportedAnimations(root, clips, meshNodes, objs) {
+  if (!clips || !clips.length) return 0;
+  const nodeLabel = (n) => n.name ? n.name : n.uuid;
+  const ancestorNames = meshNodes.map(m => {
+    const set = new Set();
+    for (let n = m; n; n = n.parent) set.add(nodeLabel(n));
+    return set;
+  });
+
+  // Reuse the untouched default clip if nothing has been keyframed yet; otherwise append.
+  const defaultUnused = anim.clips.length === 1 &&
+    !objects.some(o => { const tr = o.animClips && o.animClips[anim.clips[0].id]; return tr && (tr.pos.length || tr.rot.length || tr.scale.length); });
+  const registry = defaultUnused ? [] : anim.clips;
+  const usedIds = new Set(registry.map(c => c.id));
+  const mixer = new THREE.AnimationMixer(root);
+  const round = (v) => Math.round(v * 1000) / 1000;
+  let added = 0;
+
+  clips.forEach((clip, ci) => {
+    const trackNodeNames = clip.tracks.map(tr => {
+      const dot = tr.name.lastIndexOf('.');
+      return { name: dot > 0 ? tr.name.slice(0, dot) : tr.name, times: Array.from(tr.times) };
+    });
+
+    // Which imported meshes does this clip move, and at which times?
+    const jobs = [];
+    meshNodes.forEach((node, i) => {
+      const times = new Set([0]);
+      let affected = false;
+      trackNodeNames.forEach(t => {
+        if (ancestorNames[i].has(t.name)) { affected = true; t.times.forEach(x => times.add(round(x))); }
+      });
+      if (affected) jobs.push({ node, obj: objs[i], times: [...times].sort((a, b) => a - b) });
+    });
+    if (!jobs.length) return;
+
+    const duration = Math.max(0.1, clip.duration || 0.1);
+    jobs.forEach(j => { if (!j.times.some(t => Math.abs(t - duration) < 0.005)) j.times.push(round(duration)); });
+
+    const name = (clip.name && clip.name.trim()) ? clip.name.trim() : `Animation ${registry.length + 1}`;
+    const id = slugifyClipId(name, usedIds);
+    usedIds.add(id);
+    registry.push({ id, name, duration });
+
+    const action = mixer.clipAction(clip);
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.play();
+
+    const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
+    jobs.forEach(j => { j.obj.animClips = j.obj.animClips || {}; j.obj.animClips[id] = { pos: [], rot: [], scale: [] }; ensureAnimBasePose(j.obj); });
+
+    // Sample every distinct time once and update all affected meshes together.
+    const allTimes = [...new Set(jobs.flatMap(j => j.times))].sort((a, b) => a - b);
+    allTimes.forEach(t => {
+      mixer.setTime(Math.min(t, duration));
+      root.updateMatrixWorld(true);
+      jobs.forEach(j => {
+        if (!j.times.includes(t)) return;
+        j.node.matrixWorld.decompose(pos, quat, scl);
+        const tr = j.obj.animClips[id];
+        tr.pos.push({ t, x: pos.x, y: pos.y, z: pos.z, ease: 'linear' });
+        tr.rot.push({ t, x: quat.x, y: quat.y, z: quat.z, w: quat.w, ease: 'linear' });
+        tr.scale.push({ t, x: scl.x, y: scl.y, z: scl.z, ease: 'linear' });
+      });
+    });
+    action.stop();
+    mixer.uncacheClip(clip);
+    added++;
+  });
+  mixer.stopAllAction();
+  mixer.uncacheRoot(root);
+
+  if (added) {
+    anim.clips = registry;
+    anim.activeClipId = registry[0].id;
+    anim.duration = registry[0].duration;
+    anim.time = 0;
+    if (anim.active) {
+      animDurationInput.value = anim.duration;
+      refreshClipSelect();
+      applyAnimAtTime(0);
+      refreshAnimTrackList();
+      updateAnimTimeLabel();
+      updateScrubBar();
+    }
+  } else if (defaultUnused) {
+    // nothing was added; registry untouched
+  }
+  return added;
+}
+
 document.getElementById('btn-import').addEventListener('click', () => document.getElementById('file-import').click());
 document.getElementById('file-import').addEventListener('change', (e) => {
   const file = e.target.files[0];
@@ -3654,7 +3752,7 @@ document.getElementById('file-import').addEventListener('change', (e) => {
   const ext = file.name.split('.').pop().toLowerCase();
   const url = URL.createObjectURL(file);
 
-  const finishImport = (rootObject3D, baseName) => {
+  const finishImport = (rootObject3D, baseName, importedClips) => {
     pushUndo();
     const meshesFound = [];
     rootObject3D.traverse((child) => {
@@ -3740,13 +3838,15 @@ document.getElementById('file-import').addEventListener('change', (e) => {
       }, true);
       return obj;
     });
+    // Bake any animation clips from the file into the editor's keyframe tracks.
+    const bakedClipCount = bakeImportedAnimations(rootObject3D, importedClips, meshesFound, newObjs);
     setSelection(newObjs);
     refreshOutliner(); refreshEmptyState();
-    showToast(`Imported ${newObjs.length} object${newObjs.length!==1?'s':''} from ${file.name}`);
+    showToast(`Imported ${newObjs.length} object${newObjs.length!==1?'s':''} from ${file.name}` + (bakedClipCount ? ` with ${bakedClipCount} animation${bakedClipCount!==1?'s':''}` : ''));
   };
 
   if (ext === 'glb' || ext === 'gltf') {
-    gltfLoader.load(url, (gltf) => finishImport(gltf.scene, file.name.replace(/\.(glb|gltf)$/i,'')), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
+    gltfLoader.load(url, (gltf) => finishImport(gltf.scene, file.name.replace(/\.(glb|gltf)$/i,''), gltf.animations), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
   } else if (ext === 'obj') {
     new OBJLoader().load(url, (objRoot) => finishImport(objRoot, file.name.replace(/\.obj$/i,'')), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
   } else {
