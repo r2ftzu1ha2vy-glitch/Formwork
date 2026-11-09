@@ -679,6 +679,21 @@
   }
   .seg-opt.active{ background:var(--accent-dim); color:var(--accent); }
   .seg-opt:hover:not(.active){ color:var(--text-0); }
+  #multiscale-control{ margin-left:2px; }
+  #scale-size-panel{
+    position:absolute; top:40px; left:14px; width:236px;
+    background:var(--bg-1); border:1px solid var(--line); border-radius:10px;
+    padding:10px 12px 12px; box-shadow:0 10px 28px rgba(0,0,0,0.35);
+    display:none; z-index:20; font-size:12px;
+  }
+  #scale-size-panel.show{ display:block; }
+  #scale-size-panel .ssp-title{ font-size:10.5px; font-weight:700; letter-spacing:0.8px; text-transform:uppercase; color:var(--text-2); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+  #scale-size-panel .ssp-title span.sel{ color:var(--accent); letter-spacing:0; text-transform:none; font-weight:600; }
+  #scale-size-panel .ssp-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:8px; }
+  #scale-size-panel label.ssp-lock{ display:flex; align-items:center; gap:6px; color:var(--text-1); cursor:pointer; margin-bottom:8px; }
+  #scale-size-panel .ssp-btns{ display:flex; gap:6px; }
+  #scale-size-panel .ssp-btns .btn{ flex:1; justify-content:center; padding:6px 4px; }
+  #scale-size-panel .ssp-hint{ margin-top:8px; font-size:10.5px; color:var(--text-2); line-height:1.4; }
 
   .scale-snap-input{
     width:72px; flex-shrink:0;
@@ -782,6 +797,11 @@
       </div>
       <div class="tool-btn" data-tool="scale" title="Scale (R)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 L13 11 M21 3 L21 9 M21 3 L15 3"/><rect x="3" y="13" width="8" height="8" rx="1"/></svg>
+      </div>
+      <div class="divider"></div>
+      <div class="seg-control" id="multiscale-control" title="Scaling mode for the selection. Stretch: each axis scales on its own (normal gizmo). Scale: the whole selection scales together, uniformly, and you can type the exact size you want.">
+        <div class="seg-opt active" data-value="stretch">Stretch</div>
+        <div class="seg-opt" data-value="scale">Scale</div>
       </div>
       <div class="divider"></div>
       <div class="tool-btn" data-tool="local" title="Toggle local/world space">
@@ -990,6 +1010,21 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 Z"/><path d="M4 6.5 12 11 20 6.5M12 11v11"/></svg>
       <div class="t1">Empty scene</div>
       <div class="t2">Add a shape from the left panel to start modeling</div>
+    </div>
+    <div id="scale-size-panel">
+      <div class="ssp-title"><span>Scale to size</span><span class="sel" id="ssp-sel">0 selected</span></div>
+      <div class="ssp-row">
+        <div class="xyz-field x"><span class="axis">W</span><input type="number" step="0.1" min="0.001" id="ssp-x"></div>
+        <div class="xyz-field y"><span class="axis">H</span><input type="number" step="0.1" min="0.001" id="ssp-y"></div>
+        <div class="xyz-field z"><span class="axis">D</span><input type="number" step="0.1" min="0.001" id="ssp-z"></div>
+      </div>
+      <label class="ssp-lock"><input type="checkbox" id="ssp-lock" checked> Keep proportions (whole thing scales together)</label>
+      <div class="ssp-btns">
+        <button class="btn" id="ssp-half">&frac12;&times;</button>
+        <button class="btn" id="ssp-double">2&times;</button>
+        <button class="btn" id="ssp-x10">10&times;</button>
+      </div>
+      <div class="ssp-hint">Type a width, height or depth in world units and press Enter. The whole selection is resized around its center.</div>
     </div>
     <div class="viewport-badge">Perspective</div>
     <div class="axis-gizmo-label">X <span style="color:#e8636b">red</span> · Y <span style="color:#5ec98f">green</span> · Z <span style="color:#5b9dd9">blue</span></div>
@@ -2467,6 +2502,10 @@ function removeSelectionOutlineFor(id) {
   }
 }
 
+// 'stretch' = normal per-axis scaling of a multi-selection; 'scale' = the whole selection
+// scales uniformly (all axes together) and exposes the "Scale to size" panel.
+let multiScaleMode = 'stretch';
+let multiProxyUniform = 1;
 function attachGizmoToSelection() {
   const selObjs = objects.filter(o => selectedSet.has(o.id));
   if (selObjs.length === 0) {
@@ -2482,6 +2521,7 @@ function attachGizmoToSelection() {
     multiProxy.position.copy(center);
     multiProxy.rotation.set(0,0,0);
     multiProxy.scale.set(1,1,1);
+    multiProxyUniform = 1;
     proxyChildOffsets = selObjs.map(o => ({
       obj: o,
       relPos: o.mesh.position.clone().sub(center),
@@ -2758,6 +2798,15 @@ function applyResizeEdgeSnap(obj) {
 // When dragging the proxy, propagate to real objects
 transformControls.addEventListener('objectChange', () => {
   const target = transformControls.object;
+
+  if (target === multiProxy && transformControls.mode === 'scale' && multiScaleMode === 'scale') {
+    // Uniform "Scale" mode: whichever axis the user is dragging drives all three equally.
+    const sx = multiProxy.scale.x, sy = multiProxy.scale.y, sz = multiProxy.scale.z;
+    const cand = [sx, sy, sz].reduce((best, v) => Math.abs(v - multiProxyUniform) > Math.abs(best - multiProxyUniform) ? v : best, multiProxyUniform);
+    const u = Math.max(0.01, cand);
+    multiProxy.scale.set(u, u, u);
+    multiProxyUniform = u;
+  }
 
   if (target === multiProxy && proxyChildOffsets.length) {
     proxyChildOffsets.forEach(({obj, relPos, relQuat, relScale}) => {
@@ -6671,6 +6720,94 @@ function buildAnimationClips(exportScene, sourceObjects, clipNameOverrides) {
   return clips;
 }
 
+// Text-on-face textures are baked at the face's aspect when applied, so there is nothing to
+// re-render live while scaling (this was referenced by the scale handler but never defined,
+// which threw an error on every resize tick and stopped the inspector from updating).
+function refreshFitTextTextures() {}
+
+// ---------------- SCALE TO SIZE (multi-object "Scale" mode) ----------------
+const sspPanel = document.getElementById('scale-size-panel');
+const sspInputs = { x: document.getElementById('ssp-x'), y: document.getElementById('ssp-y'), z: document.getElementById('ssp-z') };
+const sspLock = document.getElementById('ssp-lock');
+const sspSel = document.getElementById('ssp-sel');
+
+// Objects the panel acts on: the selection, minus group members whose group is also selected
+// (the group already carries them).
+function scaleTargets() {
+  return objects.filter(o => selectedSet.has(o.id) && o.mesh &&
+    !(o.__groupParentId != null && selectedSet.has(o.__groupParentId)));
+}
+function selectionBox(list) {
+  const box = new THREE.Box3();
+  list.forEach(o => box.union(new THREE.Box3().setFromObject(o.mesh)));
+  return box;
+}
+function scaleSizePanelVisible() {
+  const show = multiScaleMode === 'scale' && appMode === 'simple' && selectedSet.size > 0 && !editMode.active;
+  if (sspPanel.classList.contains('show') !== show) sspPanel.classList.toggle('show', show);
+  return show;
+}
+function updateScaleSizePanel() {
+  if (Object.values(sspInputs).some(el => document.activeElement === el)) return; // don't fight typing
+  const list = scaleTargets();
+  if (!list.length) return;
+  const box = selectionBox(list);
+  if (box.isEmpty()) return;
+  const size = box.getSize(new THREE.Vector3());
+  sspInputs.x.value = size.x.toFixed(2); sspInputs.y.value = size.y.toFixed(2); sspInputs.z.value = size.z.toFixed(2);
+  const txt = list.length === 1 ? list[0].name : `${list.length} objects`;
+  if (sspSel.textContent !== txt) sspSel.textContent = txt;
+}
+
+// Scales the whole selection about the center of its combined bounding box. Positions spread
+// out/in by the factor and each object's own scale is multiplied by it, so the group keeps its
+// shape. Uniform factors are exact for rotated parts; unequal per-axis factors are approximate
+// for parts rotated off the world axes (same limitation as the Stretch gizmo).
+function scaleSelectionBy(fx, fy, fz) {
+  const list = scaleTargets();
+  if (!list.length) return;
+  const box = selectionBox(list);
+  if (box.isEmpty()) return;
+  const c = box.getCenter(new THREE.Vector3());
+  pushUndo();
+  const f = new THREE.Vector3(fx, fy, fz);
+  list.forEach(o => {
+    const m = o.mesh;
+    m.position.set(c.x + (m.position.x - c.x) * f.x, c.y + (m.position.y - c.y) * f.y, c.z + (m.position.z - c.z) * f.z);
+    m.scale.set(m.scale.x * f.x, m.scale.y * f.y, m.scale.z * f.z);
+    if (o.animBasePose) { o.animBasePose.pos.copy(m.position); o.animBasePose.scale.copy(m.scale); }
+    if (typeof collabPushTransform === 'function' && collab.active) collabPushTransform(o);
+  });
+  attachGizmoToSelection();
+  refreshInspector();
+  updateScaleSizePanel();
+}
+function applySizeEdit(axis) {
+  const list = scaleTargets();
+  if (!list.length) return;
+  const size = selectionBox(list).getSize(new THREE.Vector3());
+  const v = parseFloat(sspInputs[axis].value);
+  if (!(v > 0.001) || !(size[axis] > 1e-6)) { updateScaleSizePanel(); return; }
+  const f = v / size[axis];
+  if (sspLock.checked) scaleSelectionBy(f, f, f);
+  else scaleSelectionBy(axis === 'x' ? f : 1, axis === 'y' ? f : 1, axis === 'z' ? f : 1);
+}
+['x', 'y', 'z'].forEach(a => {
+  sspInputs[a].addEventListener('change', () => applySizeEdit(a));
+  sspInputs[a].addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sspInputs[a].blur(); } e.stopPropagation(); });
+});
+document.getElementById('ssp-half').addEventListener('click', () => scaleSelectionBy(0.5, 0.5, 0.5));
+document.getElementById('ssp-double').addEventListener('click', () => scaleSelectionBy(2, 2, 2));
+document.getElementById('ssp-x10').addEventListener('click', () => scaleSelectionBy(10, 10, 10));
+
+document.querySelectorAll('#multiscale-control .seg-opt').forEach(opt => opt.addEventListener('click', () => {
+  multiScaleMode = opt.dataset.value;
+  document.querySelectorAll('#multiscale-control .seg-opt').forEach(o => o.classList.toggle('active', o === opt));
+  if (multiScaleMode === 'scale') setTool('scale'); // jump to the scale gizmo so the mode is visible at once
+  attachGizmoToSelection(); // re-seed the multi-selection pivot so both modes start from a clean 1x
+  showToast(multiScaleMode === 'scale' ? 'Scale mode: whole selection scales together' : 'Stretch mode: scale each axis separately');
+}));
+
 // ---------------- RESIZE / LOOP ----------------
 function onResize() {
   const w = wrap.clientWidth, h = wrap.clientHeight;
@@ -6685,6 +6822,7 @@ function animate() {
   orbit.update();
   updateResizeHandles();
   updateTiledTextures();
+  if (scaleSizePanelVisible()) updateScaleSizePanel();
   selectionOutlines.forEach(helper => helper.update());
 
   if (anim.active && anim.playing) {
