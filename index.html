@@ -281,6 +281,16 @@
     background:var(--accent-dim); border-radius:6px 0 0 6px;
     pointer-events:none;
   }
+  .anim-range-band{
+    position:absolute; top:0; bottom:0; display:none;
+    background:rgba(91,157,217,0.32);
+    border-left:2px solid var(--blue); border-right:2px solid var(--blue);
+    pointer-events:none;
+  }
+  .anim-range-label{
+    font-family:var(--font-mono); font-size:11px; color:var(--blue);
+    white-space:nowrap;
+  }
   .anim-scrub-handle{
     position:absolute; top:-2px; width:3px; height:24px;
     background:var(--accent); border-radius:2px;
@@ -826,6 +836,27 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6M12 16v6M2 12h6M16 12h6"/><rect x="9" y="9" width="6" height="6" rx="1" transform="rotate(45 12 12)"/></svg>
         <span class="btn-label">Add Keyframe</span>
       </button>
+      <div class="divider"></div>
+      <button class="btn" id="btn-range-in" title="Set range start at the playhead (or Shift+drag the timeline bar)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H4v16h4"/><path d="M12 12h9M17 8l4 4-4 4"/></svg>
+        <span class="btn-label">Set In</span>
+      </button>
+      <button class="btn" id="btn-range-out" title="Set range end at the playhead (or Shift+drag the timeline bar)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h4v16h-4"/><path d="M12 12H3M7 8l-4 4 4 4"/></svg>
+        <span class="btn-label">Set Out</span>
+      </button>
+      <button class="btn" id="btn-range-copy" title="Copy the keyframes inside the range (selected objects, or every animated object if none selected)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+        <span class="btn-label">Copy Range</span>
+      </button>
+      <button class="btn" id="btn-range-paste" title="Paste the copied range starting at the playhead">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+        <span class="btn-label">Paste</span>
+      </button>
+      <button class="btn" id="btn-range-paste-mirror" title="Paste the copied range mirrored left/right: right-side objects get the left side's motion and vice versa">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18" stroke-dasharray="2 2" opacity="0.6"/><path d="M9 7 3 12l6 5V7zM15 7l6 5-6 5V7z"/></svg>
+        <span class="btn-label">Paste Mirrored</span>
+      </button>
     </div>
     <div class="topbar-spacer"></div>
     <button class="btn" id="btn-undo" title="Undo (Ctrl+Z)">
@@ -1030,6 +1061,7 @@
           <option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option>
         </select>
         <div class="anim-time" id="anim-time-label">0.00s / 3.00s</div>
+        <div class="anim-range-label" id="anim-range-label" title="Shift+drag the bar below to select a range"></div>
         <div class="anim-duration-field">
           <span>Duration</span>
           <input type="number" id="anim-duration-input" value="3" min="0.5" max="120" step="0.5">
@@ -5974,6 +6006,7 @@ function updateScrubBar() {
   const pct = anim.duration > 0 ? (anim.time / anim.duration) * 100 : 0;
   animScrubFill.style.width = `${pct}%`;
   animScrubHandle.style.left = `${pct}%`;
+  updateRangeUI();
 }
 
 // ---- Scrubbing: drag the bar, or just scroll the mouse wheel over it/the tracks ----
@@ -5987,14 +6020,220 @@ function scrubToClientX(clientX) {
   setAnimTime(f * anim.duration);
 }
 let isScrubbing = false;
+// Plain drag scrubs time. Shift+drag selects a time RANGE (for Copy Range / Paste).
+// Shift+click without dragging clears the range.
+let rangeDragAnchor = null, rangeDragMoved = false;
+animScrubWrap.title = 'Drag to scrub · Shift+drag to select a range · Shift+click to clear it';
+function timeAtClientX(clientX) {
+  const rect = animScrubWrap.getBoundingClientRect();
+  const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  return Math.round(f * anim.duration * 100) / 100;
+}
 animScrubWrap.addEventListener('pointerdown', (e) => {
-  isScrubbing = true;
   animScrubWrap.setPointerCapture(e.pointerId);
   if (anim.playing) toggleAnimPlay();
+  if (e.shiftKey) {
+    rangeDragAnchor = timeAtClientX(e.clientX);
+    rangeDragMoved = false;
+    return;
+  }
+  isScrubbing = true;
   scrubToClientX(e.clientX);
 });
-animScrubWrap.addEventListener('pointermove', (e) => { if (isScrubbing) scrubToClientX(e.clientX); });
-animScrubWrap.addEventListener('pointerup', () => { isScrubbing = false; });
+animScrubWrap.addEventListener('pointermove', (e) => {
+  if (rangeDragAnchor !== null) {
+    const t = timeAtClientX(e.clientX);
+    const rect = animScrubWrap.getBoundingClientRect();
+    if (Math.abs(t - rangeDragAnchor) / Math.max(anim.duration, 0.01) * rect.width > 3) rangeDragMoved = true;
+    if (rangeDragMoved) {
+      animRange.in = Math.min(rangeDragAnchor, t);
+      animRange.out = Math.max(rangeDragAnchor, t);
+      updateRangeUI();
+    }
+    return;
+  }
+  if (isScrubbing) scrubToClientX(e.clientX);
+});
+animScrubWrap.addEventListener('pointerup', () => {
+  if (rangeDragAnchor !== null && !rangeDragMoved) { animRange.in = null; animRange.out = null; updateRangeUI(); }
+  rangeDragAnchor = null;
+  isScrubbing = false;
+});
+
+// ---- Range copy / paste / mirrored paste ----
+// A "range" is a start/end time on the active clip. Copy Range grabs every keyframe inside
+// it (for the selected objects, or every animated object when nothing is selected), plus
+// interpolated boundary keys so the copied motion plays back identically. Paste drops it at
+// the playhead, replacing whatever keys the targets had in that span.
+// Paste Mirrored flips the motion across the X axis (x = 0): positions negate X, rotations
+// mirror (Y and Z components of the quaternion negate), scale is unchanged. Each object is
+// paired with the object sitting at its mirrored rest position (same shape type), so the
+// RIGHT side's motion lands on the LEFT side and vice versa. Objects on the center line
+// (X ≈ 0) mirror onto themselves.
+const animRange = { in: null, out: null };
+let animRangeClipboard = null; // { length, entries:[{objId,type,baseX,baseY,baseZ,pos,rot,scale}] }
+const animRangeBand = document.createElement('div');
+animRangeBand.className = 'anim-range-band';
+animScrubWrap.appendChild(animRangeBand);
+const animRangeLabel = document.getElementById('anim-range-label');
+
+function rangeIsValid() {
+  return animRange.in !== null && animRange.out !== null && animRange.out - animRange.in >= 0.01;
+}
+function updateRangeUI() {
+  if (rangeIsValid() && anim.duration > 0) {
+    const a = Math.min(animRange.in, anim.duration), b = Math.min(animRange.out, anim.duration);
+    animRangeBand.style.display = 'block';
+    animRangeBand.style.left = `${(a / anim.duration) * 100}%`;
+    animRangeBand.style.width = `${Math.max(0, (b - a) / anim.duration) * 100}%`;
+    animRangeLabel.textContent = `Range ${a.toFixed(2)}–${b.toFixed(2)}s`;
+  } else {
+    animRangeBand.style.display = 'none';
+    animRangeLabel.textContent = animRange.in !== null ? `In ${animRange.in.toFixed(2)}s` : (animRange.out !== null ? `Out ${animRange.out.toFixed(2)}s` : '');
+  }
+}
+function trackHasKeys(tr) { return !!tr && (tr.pos.length || tr.rot.length || tr.scale.length); }
+
+function getRangeTargets() {
+  const ids = new Set();
+  selectedSet.forEach(id => {
+    const o = objects.find(x => x.id === id);
+    if (!o) return;
+    if (o.type === 'group') (o.childIds || []).forEach(c => ids.add(c)); else ids.add(id);
+  });
+  let list = objects.filter(o => ids.has(o.id) && o.type !== 'group' && o.mesh);
+  if (!list.length) {
+    list = objects.filter(o => o.type !== 'group' && o.mesh && trackHasKeys(o.animClips && o.animClips[anim.activeClipId]));
+  }
+  return list;
+}
+
+// Returns the keys of one track between times a and b, re-timed so the range starts at 0.
+// Boundary keys are sampled from the existing curve when no key sits exactly on a or b.
+function sliceTrackRange(keys, a, b, isQuat) {
+  if (!keys.length) return [];
+  const eps = 0.005;
+  const sample = (t) => isQuat ? sampleQuatTrack(keys, t) : sampleVecTrack(keys, t);
+  const easeAt = (t) => { let e = 'linear'; keys.forEach(k => { if (k.t <= t + 1e-6) e = k.ease || 'linear'; }); return e; };
+  const mk = (t, v, ease) => isQuat ? { t, x: v.x, y: v.y, z: v.z, w: v.w, ease } : { t, x: v.x, y: v.y, z: v.z, ease };
+  const out = [];
+  const nearA = keys.find(k => Math.abs(k.t - a) < eps);
+  out.push(nearA ? { ...nearA, t: 0 } : mk(0, sample(a), easeAt(a)));
+  keys.forEach(k => { if (k.t > a + eps && k.t < b - eps) out.push({ ...k, t: k.t - a }); });
+  const nearB = keys.find(k => Math.abs(k.t - b) < eps);
+  out.push(nearB ? { ...nearB, t: b - a } : mk(b - a, sample(b), easeAt(b)));
+  return out;
+}
+
+function restPos(o) { return o.animBasePose ? o.animBasePose.pos : o.mesh.position; }
+
+function setRangeIn() {
+  animRange.in = Math.round(anim.time * 100) / 100;
+  if (animRange.out !== null && animRange.out <= animRange.in) animRange.out = null;
+  updateRangeUI();
+}
+function setRangeOut() {
+  animRange.out = Math.round(anim.time * 100) / 100;
+  if (animRange.in !== null && animRange.in >= animRange.out) animRange.in = null;
+  updateRangeUI();
+}
+
+function copyAnimRange() {
+  if (!anim.active) { showToast('Enter Animation Mode first', true); return; }
+  if (!rangeIsValid()) { showToast('Set a range first: Shift+drag the timeline bar, or use Set In / Set Out', true); return; }
+  const a = animRange.in, b = Math.min(animRange.out, anim.duration);
+  if (b - a < 0.01) { showToast('Range is outside the clip', true); return; }
+  const entries = [];
+  getRangeTargets().forEach(o => {
+    const tr = o.animClips && o.animClips[anim.activeClipId];
+    if (!trackHasKeys(tr)) return;
+    const base = restPos(o);
+    entries.push({
+      objId: o.id, type: o.type, name: o.name,
+      baseX: base.x, baseY: base.y, baseZ: base.z,
+      pos: sliceTrackRange(tr.pos, a, b, false),
+      rot: sliceTrackRange(tr.rot, a, b, true),
+      scale: sliceTrackRange(tr.scale, a, b, false)
+    });
+  });
+  if (!entries.length) { showToast('No keyframes found for the selected objects', true); return; }
+  animRangeClipboard = { length: b - a, entries };
+  showToast(`Copied ${a.toFixed(2)}–${b.toFixed(2)}s from ${entries.length} object${entries.length !== 1 ? 's' : ''}`);
+}
+
+function findMirrorCounterpart(entry, pool) {
+  if (Math.abs(entry.baseX) < 0.05) return objects.find(o => o.id === entry.objId) || null; // on the center line
+  let best = null, bestDist = 0.5;
+  pool.forEach(o => {
+    if (o.id === entry.objId || o.type !== entry.type) return;
+    const p = restPos(o);
+    const d = Math.hypot(p.x + entry.baseX, p.y - entry.baseY, p.z - entry.baseZ);
+    if (d < bestDist) { bestDist = d; best = o; }
+  });
+  return best;
+}
+
+function pasteAnimRange(mirror) {
+  if (!anim.active) { showToast('Enter Animation Mode first', true); return; }
+  if (!animRangeClipboard) { showToast('Copy a range first', true); return; }
+  const T = Math.round(anim.time * 1000) / 1000;
+  const len = animRangeClipboard.length;
+  const entries = animRangeClipboard.entries;
+  const pool = objects.filter(o => o.type !== 'group' && o.mesh);
+  const selSingle = (selectedSet.size === 1 && selected && selected.type !== 'group') ? selected : null;
+
+  const jobs = [];
+  entries.forEach(en => {
+    let target = null;
+    if (mirror) {
+      target = findMirrorCounterpart(en, pool);
+      if (!target && entries.length === 1 && selSingle) target = selSingle;
+    } else {
+      target = (entries.length === 1 && selSingle) ? selSingle : (objects.find(o => o.id === en.objId) || null);
+    }
+    if (target) jobs.push({ en, target });
+  });
+  if (!jobs.length) {
+    showToast(mirror ? 'No mirrored counterpart found (objects need matching shapes at mirrored X positions)' : 'Original objects no longer exist', true);
+    return;
+  }
+
+  pushUndo();
+  if (T + len > anim.duration + 0.001) {
+    anim.duration = Math.ceil((T + len) * 100) / 100;
+    getActiveClipMeta().duration = anim.duration;
+    animDurationInput.value = anim.duration;
+    updateAnimTimeLabel();
+    updateScrubBar();
+  }
+  jobs.forEach(({ en, target }) => {
+    ensureAnimBasePose(target);
+    const tr = ensureClipTracks(target, anim.activeClipId);
+    ['pos', 'rot', 'scale'].forEach(name => {
+      const src = en[name];
+      if (!src.length) return;
+      tr[name] = tr[name].filter(k => k.t < T - 0.005 || k.t > T + len + 0.005); // replace the pasted span
+      src.forEach(k => {
+        const nk = { ...k, t: Math.round((T + k.t) * 1000) / 1000 };
+        if (mirror) {
+          if (name === 'pos') nk.x = -nk.x;
+          else if (name === 'rot') { nk.y = -nk.y; nk.z = -nk.z; }
+        }
+        upsertKey(tr[name], nk);
+      });
+    });
+  });
+  refreshAnimTrackList();
+  applyAnimAtTime(anim.time);
+  const skipped = entries.length - jobs.length;
+  showToast(`Pasted${mirror ? ' mirrored' : ''} onto ${jobs.length} object${jobs.length !== 1 ? 's' : ''} at ${T.toFixed(2)}s` + (skipped ? ` (${skipped} had no mirrored counterpart)` : ''));
+}
+
+document.getElementById('btn-range-in').addEventListener('click', setRangeIn);
+document.getElementById('btn-range-out').addEventListener('click', setRangeOut);
+document.getElementById('btn-range-copy').addEventListener('click', copyAnimRange);
+document.getElementById('btn-range-paste').addEventListener('click', () => pasteAnimRange(false));
+document.getElementById('btn-range-paste-mirror').addEventListener('click', () => pasteAnimRange(true));
 
 // Scroll wheel over the scrub bar OR any track lane nudges time — this is the
 // easy, low-effort way for a new user to "scroll through" the animation.
@@ -6081,13 +6320,15 @@ function refreshAnimTrackList(playheadOnly=false) {
       const dot = document.createElement('div');
       dot.className = 'anim-key-dot';
       dot.style.left = `${(t / anim.duration) * 100}%`;
-      dot.title = `${t.toFixed(2)}s — click to jump, Shift+click to delete, right-click for more`;
-      dot.addEventListener('click', (e) => {
+      if (keySelSet().has(keyId(o, t))) dot.classList.add('selected');
+      dot.title = `${t.toFixed(2)}s — click to select, drag to move, Shift/Ctrl+click to multi-select, Delete to remove, ←/→ to nudge, right-click for more`;
+      dot.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
         e.stopPropagation();
-        if (e.shiftKey) { removeKeyframe(o, null, t); return; }
-        selectObject(o);
-        setAnimTime(t);
+        e.preventDefault();
+        beginKeyDrag(e, o, t, lane);
       });
+      dot.addEventListener('click', (e) => e.stopPropagation()); // selection is handled on pointerdown/up
       dot.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -6102,9 +6343,11 @@ function refreshAnimTrackList(playheadOnly=false) {
     lane.appendChild(playhead);
 
     lane.addEventListener('click', (e) => {
+      if (animKeyJustDragged) return; // the click that ends a keyframe drag shouldn't also scrub
       const rect = lane.getBoundingClientRect();
       const f = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       setAnimTime(f * anim.duration);
+      if (keySelSet().size) { keySelSet().clear(); refreshAnimTrackList(); } // clicking empty lane deselects keyframes
     });
     lane.addEventListener('contextmenu', (e) => {
       e.preventDefault();
