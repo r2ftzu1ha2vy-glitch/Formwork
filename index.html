@@ -1640,6 +1640,62 @@ function serializeMaterial(m) {
   };
 }
 
+// ---- Transparent image support ----
+// PNGs "with no background" carry an alpha channel. Previously the alpha was blended
+// normally, so the see-through regions just showed the dark viewport behind the object
+// (and the hidden black RGB of those pixels bled into the edges as a dark fringe).
+// We now detect real transparency once per texture and render it as a proper cutout
+// (alphaTest), with a matching shadow so the shadow follows the image shape too.
+function prepareAlphaTexture(tex) {
+  const ud = tex.userData || (tex.userData = {});
+  if (ud.alphaChecked) return !!ud.hasAlpha;
+  ud.alphaChecked = true;
+  ud.hasAlpha = false;
+  const img = tex.image;
+  const w = img && (img.width || img.videoWidth), h = img && (img.height || img.videoHeight);
+  if (!w || !h) return false;
+  try {
+    // Sample on a small canvas — enough to know whether any pixel is see-through.
+    const sw = Math.min(w, 256), sh = Math.min(h, 256);
+    const cnv = document.createElement('canvas');
+    cnv.width = sw; cnv.height = sh;
+    const ctx = cnv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, sw, sh);
+    const d = ctx.getImageData(0, 0, sw, sh).data;
+    for (let i = 3; i < d.length; i += 4) {
+      if (d[i] < 250) { ud.hasAlpha = true; break; }
+    }
+  } catch (err) {
+    console.warn('Could not inspect texture for transparency', err);
+  }
+  return !!ud.hasAlpha;
+}
+
+// Cutout threshold: pixels less than ~half opaque are discarded, which also removes the
+// dark anti-aliasing halo that blending would otherwise leave around the image edge.
+function applyAlphaCutout(mat, tex) {
+  const a = !!(tex && tex.userData && tex.userData.hasAlpha);
+  mat.alphaTest = a ? 0.5 : 0;
+  mat.needsUpdate = true;
+  return a;
+}
+
+// Makes the shadow follow the visible (non-transparent) part of the image instead of
+// the full solid shape. Works for single materials and per-face material arrays.
+function syncCutoutShadow(mesh) {
+  if (!mesh || !mesh.material) return;
+  const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  const withAlpha = list.find(m => m.map && m.map.userData && m.map.userData.hasAlpha);
+  if (mesh.customDepthMaterial) { mesh.customDepthMaterial.dispose(); mesh.customDepthMaterial = null; }
+  if (withAlpha) {
+    mesh.customDepthMaterial = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking,
+      map: withAlpha.map,
+      alphaTest: 0.5
+    });
+  }
+}
+
 // Full-scene snapshot for undo/redo (handles add/delete/import, not just transform edits)
 function snapshotScene() {
   // Groups have no geometry/material to serialize. Rather than crash or silently
@@ -1824,6 +1880,7 @@ function restoreScene(snap) {
             tex.isTextTexture = isText;
             if (!isText) { tex.userData.tile = !!fm.mapTile; if (fm.mapTile && fm.mapTile.w > 0) tex.userData.tileSize = { w: fm.mapTile.w, h: fm.mapTile.h }; applyTextureModeToTexture(tex, faceWorldSize({ mesh }, faceName)); }
             mats[i].map = tex; mats[i].needsUpdate = true;
+            if (!isText) { prepareAlphaTexture(tex); applyAlphaCutout(mats[i], tex); syncCutoutShadow(mesh); }
           },
           undefined,
           () => console.warn(`Face texture for "${s.name}" (${FACE_ORDER[i]}) could not be loaded`)
@@ -1849,6 +1906,7 @@ function restoreScene(snap) {
             tex.userData.tile = !!s.mapTile; if (s.mapTile && s.mapTile.w > 0) tex.userData.tileSize = { w: s.mapTile.w, h: s.mapTile.h };
             applyTextureModeToTexture(tex, { w: size.x || 1, h: size.y || 1 });
             mat.map = tex; mat.needsUpdate = true;
+            prepareAlphaTexture(tex); applyAlphaCutout(mat, tex); syncCutoutShadow(mesh);
           },
           undefined,
           () => console.warn(`Texture for "${s.name}" could not be loaded (stale blob: URL from an older save?)`)
@@ -2086,7 +2144,7 @@ function createObjectFromClone(data, posOverride) {
       });
       if (fm.emissive) m.emissive.set(fm.emissive);
       if (fm.emissiveIntensity) m.emissiveIntensity = fm.emissiveIntensity;
-      if (fm.map) { m.map = fm.map; m.needsUpdate = true; }
+      if (fm.map) { m.map = fm.map; applyAlphaCutout(m, fm.map); m.needsUpdate = true; }
       return m;
     });
     if (data.geoGroups) {
@@ -2110,9 +2168,11 @@ function createObjectFromClone(data, posOverride) {
     mesh = new THREE.Mesh(geo, mat);
     if (data.map) {
       mat.map = data.map;
+      applyAlphaCutout(mat, data.map);
       mat.needsUpdate = true;
     }
   }
+  syncCutoutShadow(mesh);
   mesh.castShadow = true; mesh.receiveShadow = true;
   mesh.position.copy(posOverride || data.pos);
   mesh.rotation.copy(data.rot);
@@ -3231,6 +3291,7 @@ function refreshInspector() {
       new THREE.TextureLoader().load(dataUrl, (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.userData.tile = nextImageTile;
+        const hasAlpha = prepareAlphaTexture(tex); // must run before clone() so every face inherits the result
         pushUndo();
         const box = new THREE.Box3().setFromObject(o.mesh);
         const size = box.getSize(new THREE.Vector3());
@@ -3240,8 +3301,12 @@ function refreshInspector() {
           applyTextureModeToTexture(t, { w: size.x || 1, h: size.y || 1 });
           m.map = t;
           m.transparent = true;
-          m.needsUpdate = true;
+          // A transparent image should show its own colors, not be tinted by the
+          // object's base color (a dark base color multiplies the image toward black).
+          if (hasAlpha) m.color.set('#ffffff');
+          applyAlphaCutout(m, t);
         });
+        syncCutoutShadow(o.mesh);
         o.faceLabels = null;
         refreshInspector();
       });
@@ -3265,7 +3330,7 @@ function refreshInspector() {
   const clearBtn = document.getElementById('f-tex-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => {
     pushUndo();
-    if (primaryMat.map) { primaryMat.map.dispose(); primaryMat.map = null; primaryMat.needsUpdate = true; }
+    if (primaryMat.map) { primaryMat.map.dispose(); primaryMat.map = null; primaryMat.alphaTest = 0; primaryMat.needsUpdate = true; syncCutoutShadow(o.mesh); }
     refreshInspector();
   });
 
@@ -4039,7 +4104,8 @@ function ensureFaceMaterials(obj) {
     depthWrite: src.depthWrite,
     emissive: src.emissive.clone(),
     emissiveIntensity: src.emissiveIntensity,
-    side: src.side
+    side: src.side,
+    alphaTest: src.alphaTest
   };
   const mats = FACE_ORDER.map(() => new THREE.MeshStandardMaterial({ ...base, color: base.color.clone(), emissive: base.emissive.clone() }));
 
@@ -4083,6 +4149,7 @@ function applyFaceTexture(obj, face, tex) {
     mats[idx].map = tex;
     mats[idx].transparent = false;
     mats[idx].depthWrite = true;
+    mats[idx].alphaTest = 0; // text textures are fully opaque
     mats[idx].needsUpdate = true;
   } else {
     const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
@@ -4091,8 +4158,10 @@ function applyFaceTexture(obj, face, tex) {
     mat.side = THREE.DoubleSide;
     mat.transparent = false;
     mat.depthWrite = true;
+    mat.alphaTest = 0;
     mat.needsUpdate = true;
   }
+  syncCutoutShadow(mesh);
 }
 
 // Removes a face's text texture and reverts that face's material back to a plain
@@ -6085,6 +6154,28 @@ function bakeKeys(keys, isQuat) {
   out.push(keys[keys.length - 1]);
   return out;
 }
+// Clamp keys to the clip length and pad a key at t=0 and t=duration (holding the first/last
+// value). Without this the exported animation only lasts until the last keyframe, so a
+// 3s clip with its last key at 1s plays/loops as a 1s clip, and other tools may show the
+// object snapping to its rest pose before the first key.
+function padKeysToDuration(keys, duration) {
+  if (!keys.length) return keys;
+  let ks = keys.filter(k => k.t <= duration + 0.0005);
+  if (!ks.length) ks = [keys[0]];
+  ks = ks.map(k => ({ ...k }));
+  const first = ks[0], last = ks[ks.length - 1];
+  if (first.t > 0.0005) ks.unshift({ ...first, t: 0 });
+  if (last.t < duration - 0.0005) ks.push({ ...last, t: duration });
+  return ks;
+}
+// Keep consecutive quaternions in the same hemisphere so every viewer slerps the short way.
+function makeQuatFlatContinuous(flat) {
+  for (let i = 4; i < flat.length; i += 4) {
+    const dot = flat[i]*flat[i-4] + flat[i+1]*flat[i-3] + flat[i+2]*flat[i-2] + flat[i+3]*flat[i-1];
+    if (dot < 0) { flat[i] = -flat[i]; flat[i+1] = -flat[i+1]; flat[i+2] = -flat[i+2]; flat[i+3] = -flat[i+3]; }
+  }
+  return flat;
+}
 function buildAnimationClips(exportScene, sourceObjects, clipNameOverrides) {
   const clips = [];
   anim.clips.forEach(clipMeta => {
@@ -6094,21 +6185,24 @@ function buildAnimationClips(exportScene, sourceObjects, clipNameOverrides) {
       const tr = o.animClips[clipMeta.id];
       const hasKeys = tr.pos.length || tr.rot.length || tr.scale.length;
       if (!hasKeys) return;
-      const targetName = exportScene.children[i].name; // clone name matches o.name (1:1 order)
+      // Bind tracks by node UUID, NOT by name. Track names are parsed by three.js where
+      // "." is a separator, so any object named like "Cube.001" (the default name for every
+      // 2nd+ shape), or two objects sharing a name, silently failed to bind and its
+      // animation was dropped from the file — leaving just static nodes.
+      const targetName = exportScene.children[i].uuid; // clone order matches sourceObjects 1:1
+      const dur = clipMeta.duration;
       if (tr.pos.length) {
-        const times = bakeKeys(tr.pos,false).map(k => k.t);
-        const values = bakeKeys(tr.pos,false).flatMap(k => [k.x, k.y, k.z]);
-        tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.position`, times, values));
+        const keys = bakeKeys(padKeysToDuration(tr.pos, dur), false);
+        tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.position`, keys.map(k => k.t), keys.flatMap(k => [k.x, k.y, k.z])));
       }
       if (tr.rot.length) {
-        const times = bakeKeys(tr.rot,true).map(k => k.t);
-        const values = bakeKeys(tr.rot,true).flatMap(k => [k.x, k.y, k.z, k.w]);
-        tracks.push(new THREE.QuaternionKeyframeTrack(`${targetName}.quaternion`, times, values));
+        const keys = bakeKeys(padKeysToDuration(tr.rot, dur), true);
+        const values = makeQuatFlatContinuous(keys.flatMap(k => [k.x, k.y, k.z, k.w]));
+        tracks.push(new THREE.QuaternionKeyframeTrack(`${targetName}.quaternion`, keys.map(k => k.t), values));
       }
       if (tr.scale.length) {
-        const times = bakeKeys(tr.scale,false).map(k => k.t);
-        const values = bakeKeys(tr.scale,false).flatMap(k => [k.x, k.y, k.z]);
-        tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.scale`, times, values));
+        const keys = bakeKeys(padKeysToDuration(tr.scale, dur), false);
+        tracks.push(new THREE.VectorKeyframeTrack(`${targetName}.scale`, keys.map(k => k.t), keys.flatMap(k => [k.x, k.y, k.z])));
       }
     });
     if (tracks.length) {
