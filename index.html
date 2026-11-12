@@ -312,6 +312,52 @@
   .edit-mode-badge.show{ display:flex; }
   .edit-mode-badge .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent); }
 
+  /* ---------- Animation v2: camera row, ease picker, watch mode ---------- */
+  .anim-track-list{ max-height:96px !important; }
+  body.anim-on #app{ grid-template-rows:48px 1fr 214px; }
+  .anim-clip-toolbar{ flex-wrap:wrap; }
+  .anim-clip-toolbar select{ min-width:110px; }
+  .anim-sep{ width:1px; height:20px; background:var(--line); margin:0 2px; }
+  .anim-btn.txt{ width:auto; padding:0 9px; font-size:11px; font-weight:600; gap:5px; white-space:nowrap; }
+  .anim-btn.txt svg{ width:13px; height:13px; }
+  .anim-key-dot.cam-dot{ background:var(--blue); border-radius:50%; transform:translate(-50%,-50%); width:11px; height:11px; }
+  .anim-key-dot.cam-dot.selected{ background:#fff; }
+  .ease-menu{
+    position:fixed; z-index:310; width:214px; max-height:min(380px,72vh); overflow-y:auto;
+    background:var(--bg-2); border:1px solid var(--line); border-radius:10px; padding:5px;
+    box-shadow:0 14px 34px rgba(0,0,0,0.45);
+  }
+  .ease-group{ font-size:9.5px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--text-2); padding:7px 8px 3px; }
+  .ease-opt{ display:flex; align-items:center; gap:9px; padding:4px 8px; border-radius:6px; cursor:pointer; font-size:12px; color:var(--text-1); }
+  .ease-opt:hover{ background:var(--bg-3); color:var(--text-0); }
+  .ease-opt.active{ background:var(--accent-dim); color:var(--accent); }
+  #cinema-ui, .cin-letterbox{ display:none; }
+  .cin-letterbox{ position:absolute; left:0; right:0; height:0; background:#000; z-index:40; pointer-events:none; }
+  body.cinema #cinema-ui{
+    display:flex; align-items:center; gap:12px;
+    position:absolute; left:50%; bottom:22px; transform:translateX(-50%);
+    width:min(760px, calc(100% - 40px)); padding:9px 14px; z-index:60;
+    background:rgba(18,19,24,.72); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,255,255,.1); border-radius:14px;
+    transition:opacity .35s;
+  }
+  body.cinema #cinema-ui.cin-hide{ opacity:0; pointer-events:none; }
+  body.cinema .cin-letterbox{ display:block; }
+  body.cinema #topbar, body.cinema #left, body.cinema #right, body.cinema #timeline,
+  body.cinema .viewport-badge, body.cinema .axis-gizmo-label, body.cinema .front-badge,
+  body.cinema .viewport-hint, body.cinema .edit-mode-badge, body.cinema #scale-size-panel,
+  body.cinema #empty-state{ display:none !important; }
+  body.cinema #app{ grid-template-columns:1fr; grid-template-rows:1fr; grid-template-areas:"canvas"; }
+  .cin-btn{ display:flex; align-items:center; justify-content:center; min-width:30px; height:30px; border-radius:8px; color:#fff; cursor:pointer; background:rgba(255,255,255,.1); }
+  .cin-btn:hover{ background:rgba(255,255,255,.2); }
+  .cin-btn.active{ background:var(--accent-dim); color:var(--accent); }
+  .cin-btn.txt{ padding:0 10px; font-size:11px; font-weight:700; }
+  .cin-btn svg{ width:15px; height:15px; }
+  .cin-time{ font-family:var(--font-mono); font-size:11.5px; color:#d6d8e0; white-space:nowrap; min-width:104px; text-align:center; }
+  .cin-bar{ position:relative; flex:1; height:6px; border-radius:3px; background:rgba(255,255,255,.18); cursor:pointer; }
+  .cin-bar::before{ content:""; position:absolute; left:0; right:0; top:-8px; bottom:-8px; }
+  .cin-fill{ height:100%; width:0; background:var(--accent); border-radius:3px; pointer-events:none; }
+
   /* ---------- LEFT: Add / Outliner ---------- */
   #left{
     grid-area:left;
@@ -1026,6 +1072,15 @@
       </div>
       <div class="ssp-hint">Type a width, height or depth in world units and press Enter. The whole selection is resized around its center.</div>
     </div>
+    <div id="cin-bar-top" class="cin-letterbox" style="top:0"></div>
+    <div id="cin-bar-bot" class="cin-letterbox" style="bottom:0"></div>
+    <div id="cinema-ui">
+      <div class="cin-btn" id="cin-play" title="Play / pause (Space)"><svg id="cin-play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+      <div class="cin-time" id="cin-time">0:00.0 / 0:03.0</div>
+      <div class="cin-bar" id="cin-bar"><div class="cin-fill" id="cin-fill"></div></div>
+      <div class="cin-btn txt" id="cin-bars" title="Cinematic letterbox bars">21:9</div>
+      <div class="cin-btn txt" id="cin-exit" title="Exit (Esc)">Exit</div>
+    </div>
     <div class="viewport-badge">Perspective</div>
     <div class="axis-gizmo-label">X <span style="color:#e8636b">red</span> · Y <span style="color:#5ec98f">green</span> · Z <span style="color:#5b9dd9">blue</span></div>
     <div class="front-badge" id="front-badge" title="Press F for front view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg><span>FRONT (+Z)</span></div>
@@ -1117,6 +1172,15 @@
         </div>
         <div class="anim-btn" id="anim-clip-delete" title="Delete clip">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></svg>
+        </div>
+        <div class="anim-sep"></div>
+        <div class="anim-btn txt" id="anim-cam-key" title="Keyframe the camera from the current view (Shift+K). Orbit/zoom first, then click.">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Cam key
+        </div>
+        <div class="anim-btn txt active" id="anim-cam-follow" title="When on, the camera follows its keyframes while you scrub or play">Follow</div>
+        <div class="anim-btn txt active" id="anim-cam-smooth" title="Smooth curved camera path through the keyframes (off = straight lines)">Smooth</div>
+        <div class="anim-btn txt primary" id="anim-watch" title="Watch the animation full-screen like a video">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>Watch
         </div>
       </div>
       <div class="anim-scrub-wrap" id="anim-scrub-wrap" title="Drag or scroll to move through time">
@@ -2019,6 +2083,8 @@ function restoreFull(snap) {
     applyAnimAtTime(anim.time);
     if (typeof updateAnimTimeLabel === 'function') updateAnimTimeLabel();
     if (typeof updateScrubBar === 'function') updateScrubBar();
+    if (typeof refreshAnimTrackList === 'function') refreshAnimTrackList();
+    if (typeof refreshCamButtons === 'function') refreshCamButtons();
   }
 }
 
@@ -3278,6 +3344,8 @@ function refreshInspector() {
   // instead of only the primary (last-clicked) object updating.
   function setColor(hexVal, mark) {
     if (mark) mark();
+    const _animTargets = selectedSet.size > 1 ? objects.filter(x => selectedSet.has(x.id) && x.mesh) : [o];
+    animMatBeforeEdit(_animTargets);
     if (selectedSet.size > 1) {
       objects.forEach(obj => {
         if (!selectedSet.has(obj.id) || !obj.mesh) return;
@@ -3290,6 +3358,7 @@ function refreshInspector() {
     document.getElementById('f-color').value = hexVal;
     document.getElementById('f-hex').value = hexVal;
     refreshOutliner();
+    animMatAfterEdit(_animTargets);
   }
   const colorEl = document.getElementById('f-color');
   const markColor = withUndoOnce(colorEl);
@@ -3375,6 +3444,7 @@ function refreshInspector() {
         tex.userData.tile = nextImageTile;
         const hasAlpha = prepareAlphaTexture(tex); // must run before clone() so every face inherits the result
         pushUndo();
+        animMatBeforeEdit([o]);
         const box = new THREE.Box3().setFromObject(o.mesh);
         const size = box.getSize(new THREE.Vector3());
         matList.forEach((m, i) => {
@@ -3390,6 +3460,7 @@ function refreshInspector() {
         });
         syncCutoutShadow(o.mesh);
         o.faceLabels = null;
+        animMatAfterEdit([o]);
         refreshInspector();
       });
     };
@@ -3412,7 +3483,9 @@ function refreshInspector() {
   const clearBtn = document.getElementById('f-tex-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => {
     pushUndo();
+    animMatBeforeEdit([o]);
     if (primaryMat.map) { primaryMat.map.dispose(); primaryMat.map = null; primaryMat.alphaTest = 0; primaryMat.needsUpdate = true; syncCutoutShadow(o.mesh); }
+    animMatAfterEdit([o]);
     refreshInspector();
   });
 
@@ -4839,6 +4912,7 @@ function saveProject() {
     savedAt: new Date().toISOString(),
     modelName: currentModelName,
     animClips: JSON.parse(JSON.stringify(anim.clips)),
+    animImages: collectAnimImages(),
     objects: snapshotScene()
   };
   const json = JSON.stringify(project, null, 2);
@@ -4854,11 +4928,14 @@ function saveProject() {
 // under DEFAULT_CLIP_ID, so we synthesize a matching single-clip registry rather
 // than leaving anim.clips pointing at a clip id nothing on disk agrees with.
 function applyLoadedClips(project) {
+  loadAnimImages(project && project.animImages);
   if (Array.isArray(project?.animClips) && project.animClips.length) {
     anim.clips = project.animClips.map(c => ({
       id: c.id || DEFAULT_CLIP_ID,
       name: c.name || 'Animation',
-      duration: (typeof c.duration === 'number' && c.duration > 0) ? c.duration : 3
+      duration: (typeof c.duration === 'number' && c.duration > 0) ? c.duration : 3,
+      cam: Array.isArray(c.cam) ? c.cam : [],
+      camSmooth: c.camSmooth !== false
     }));
   } else {
     anim.clips = [{ id: DEFAULT_CLIP_ID, name: 'Animation', duration: 3 }];
@@ -4919,6 +4996,7 @@ function autosaveToLocalStorage() {
       savedAt: new Date().toISOString(),
       modelName: currentModelName,
       animClips: JSON.parse(JSON.stringify(anim.clips)),
+      animImages: collectAnimImages(),
       objects: snapshotScene()
     };
     localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(project));
@@ -5767,7 +5845,51 @@ toggleEditMode = function() {
 // ==================================================================
 
 const DEFAULT_CLIP_ID = 'clip_1';
-const EASES = { linear: f => f, inout: f => f < .5 ? 2*f*f : 1 - Math.pow(-2*f + 2, 2) / 2, in: f => f*f, out: f => 1 - (1-f)*(1-f), hold: f => f >= 1 ? 1 : 0 };
+const TRACKS = ['pos', 'rot', 'scale', 'mat']; // per-object keyframe tracks (mat = colour + image)
+const EASES = (() => {
+  const c1 = 1.70158, c2 = c1 * 1.525, c3 = c1 + 1, c4 = (2 * Math.PI) / 3, c5 = (2 * Math.PI) / 4.5;
+  const bOut = (x) => { const n = 7.5625, d = 2.75; if (x < 1 / d) return n * x * x; if (x < 2 / d) return n * (x -= 1.5 / d) * x + .75; if (x < 2.5 / d) return n * (x -= 2.25 / d) * x + .9375; return n * (x -= 2.625 / d) * x + .984375; };
+  return {
+    linear: f => f,
+    hold: f => f >= 1 ? 1 : 0,
+    smooth: f => f * f * (3 - 2 * f),
+    smoother: f => f * f * f * (f * (f * 6 - 15) + 10),
+    // quad (original names kept so old projects still load)
+    in: f => f * f, out: f => 1 - (1 - f) * (1 - f), inout: f => f < .5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2,
+    sineIn: f => 1 - Math.cos(f * Math.PI / 2), sineOut: f => Math.sin(f * Math.PI / 2), sineInOut: f => -(Math.cos(Math.PI * f) - 1) / 2,
+    cubicIn: f => f * f * f, cubicOut: f => 1 - Math.pow(1 - f, 3), cubicInOut: f => f < .5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2,
+    quartIn: f => f ** 4, quartOut: f => 1 - Math.pow(1 - f, 4), quartInOut: f => f < .5 ? 8 * f ** 4 : 1 - Math.pow(-2 * f + 2, 4) / 2,
+    quintIn: f => f ** 5, quintOut: f => 1 - Math.pow(1 - f, 5), quintInOut: f => f < .5 ? 16 * f ** 5 : 1 - Math.pow(-2 * f + 2, 5) / 2,
+    expoIn: f => f === 0 ? 0 : Math.pow(2, 10 * f - 10), expoOut: f => f === 1 ? 1 : 1 - Math.pow(2, -10 * f),
+    expoInOut: f => f === 0 ? 0 : f === 1 ? 1 : f < .5 ? Math.pow(2, 20 * f - 10) / 2 : (2 - Math.pow(2, -20 * f + 10)) / 2,
+    circIn: f => 1 - Math.sqrt(1 - f * f), circOut: f => Math.sqrt(1 - Math.pow(f - 1, 2)),
+    circInOut: f => f < .5 ? (1 - Math.sqrt(1 - Math.pow(2 * f, 2))) / 2 : (Math.sqrt(1 - Math.pow(-2 * f + 2, 2)) + 1) / 2,
+    backIn: f => c3 * f * f * f - c1 * f * f, backOut: f => 1 + c3 * Math.pow(f - 1, 3) + c1 * Math.pow(f - 1, 2),
+    backInOut: f => f < .5 ? (Math.pow(2 * f, 2) * ((c2 + 1) * 2 * f - c2)) / 2 : (Math.pow(2 * f - 2, 2) * ((c2 + 1) * (f * 2 - 2) + c2) + 2) / 2,
+    elasticIn: f => f === 0 ? 0 : f === 1 ? 1 : -Math.pow(2, 10 * f - 10) * Math.sin((f * 10 - 10.75) * c4),
+    elasticOut: f => f === 0 ? 0 : f === 1 ? 1 : Math.pow(2, -10 * f) * Math.sin((f * 10 - 0.75) * c4) + 1,
+    elasticInOut: f => f === 0 ? 0 : f === 1 ? 1 : f < .5 ? -(Math.pow(2, 20 * f - 10) * Math.sin((20 * f - 11.125) * c5)) / 2 : (Math.pow(2, -20 * f + 10) * Math.sin((20 * f - 11.125) * c5)) / 2 + 1,
+    bounceIn: f => 1 - bOut(1 - f), bounceOut: bOut, bounceInOut: f => f < .5 ? (1 - bOut(1 - 2 * f)) / 2 : (1 + bOut(2 * f - 1)) / 2,
+  };
+})();
+const EASE_GROUPS = [
+  ['Basic', [['linear', 'Linear'], ['smooth', 'Smooth S-curve'], ['smoother', 'Smoother S-curve'], ['hold', 'Hold (step)']]],
+  ['Quad', [['in', 'Ease in'], ['out', 'Ease out'], ['inout', 'Ease in-out']]],
+  ['Sine (gentle)', [['sineIn', 'Sine in'], ['sineOut', 'Sine out'], ['sineInOut', 'Sine in-out']]],
+  ['Cubic', [['cubicIn', 'Cubic in'], ['cubicOut', 'Cubic out'], ['cubicInOut', 'Cubic in-out']]],
+  ['Quart', [['quartIn', 'Quart in'], ['quartOut', 'Quart out'], ['quartInOut', 'Quart in-out']]],
+  ['Quint (strong)', [['quintIn', 'Quint in'], ['quintOut', 'Quint out'], ['quintInOut', 'Quint in-out']]],
+  ['Expo (dramatic)', [['expoIn', 'Expo in'], ['expoOut', 'Expo out'], ['expoInOut', 'Expo in-out']]],
+  ['Circ', [['circIn', 'Circ in'], ['circOut', 'Circ out'], ['circInOut', 'Circ in-out']]],
+  ['Back (overshoot)', [['backIn', 'Back in'], ['backOut', 'Back out'], ['backInOut', 'Back in-out']]],
+  ['Elastic (spring)', [['elasticIn', 'Elastic in'], ['elasticOut', 'Elastic out'], ['elasticInOut', 'Elastic in-out']]],
+  ['Bounce', [['bounceIn', 'Bounce in'], ['bounceOut', 'Bounce out'], ['bounceInOut', 'Bounce in-out']]],
+];
+const EASE_LABEL = {};
+EASE_GROUPS.forEach(([g, list]) => list.forEach(([k, l]) => { EASE_LABEL[k] = l; }));
+function easeLabel(k) { return EASE_LABEL[k] || k; }
+// Wiggly curves need more samples when baked into a GLB's linear tracks.
+function easeSamples(k) { return /^(elastic|bounce|back)/.test(k || '') ? 48 : /^(expo|circ|quart|quint)/.test(k || '') ? 24 : 12; }
 function easeF(a, f) { return (EASES[a.ease] || EASES.linear)(f); }
 
 const anim = {
@@ -5777,7 +5899,7 @@ const anim = {
   duration: 3,         // seconds, active clip's duration (mirrors anim.clips[activeClipId].duration)
   lastFrameAt: 0,
   loop: true,
-  autoKey: false, speed: 1, defaultEase: 'inout',
+  autoKey: false, speed: 1, defaultEase: 'inout', camFollow: true,
   clips: [ { id: DEFAULT_CLIP_ID, name: 'Animation', duration: 3 } ],
   activeClipId: DEFAULT_CLIP_ID,
 };
@@ -5789,7 +5911,8 @@ function getActiveClipMeta() {
 // Every object's per-clip track set, created lazily and always in sync with anim.clips.
 function ensureClipTracks(o, clipId) {
   o.animClips = o.animClips || {};
-  if (!o.animClips[clipId]) o.animClips[clipId] = { pos: [], rot: [], scale: [] };
+  if (!o.animClips[clipId]) o.animClips[clipId] = { pos: [], rot: [], scale: [], mat: [] };
+  if (!o.animClips[clipId].mat) o.animClips[clipId].mat = [];
   return o.animClips[clipId];
 }
 
@@ -5819,6 +5942,10 @@ function enterAnimationMode() {
   anim.time = 0;
   transformControls.detach();
   orbit.enabled = true;
+  anim.fovBackup = camera.fov;
+  objects.forEach(o => { delete o.animBaseMat; });
+  document.body.classList.add('anim-on');
+  onResize();
   animTimelinePanel.style.display = 'block';
   tlHeaderDefault.style.display = 'none';
   tlTipsDefault.style.display = 'none';
@@ -5829,6 +5956,7 @@ function enterAnimationMode() {
   refreshAnimTrackList();
   updateAnimTimeLabel();
   updateScrubBar();
+  refreshCamButtons();
 }
 
 function exitAnimationMode() {
@@ -5842,6 +5970,12 @@ function exitAnimationMode() {
   // Restore objects to their authored (keyframe-independent) transforms so Simple/Edit
   // mode editing continues from a sane base pose rather than mid-animation.
   objects.forEach(o => { if (o.animBasePose) restoreAnimBasePose(o); });
+  objects.forEach(o => { if (o.animBaseMat) restoreAnimBaseMat(o); });
+  if (document.body.classList.contains('cinema')) exitCinema();
+  if (anim.fovBackup) { camera.fov = anim.fovBackup; camera.updateProjectionMatrix(); anim.fovBackup = null; }
+  orbit.enabled = true;
+  document.body.classList.remove('anim-on');
+  onResize();
 }
 
 function ensureAnimBasePose(o) {
@@ -5886,6 +6020,9 @@ function switchActiveClip(clipId) {
   refreshAnimTrackList();
   updateAnimTimeLabel();
   updateScrubBar();
+  applyCameraAtTime(anim.time);
+  refreshCamButtons();
+  camKeySel = null;
 }
 animClipSelect.addEventListener('change', () => switchActiveClip(animClipSelect.value));
 
@@ -5895,7 +6032,7 @@ function addNewClip() {
   const n = anim.clips.length + 1;
   const name = `Animation ${n}`;
   const id = slugifyClipId(name, usedIds);
-  anim.clips.push({ id, name, duration: 3 });
+  anim.clips.push({ id, name, duration: 3, cam: [] });
   switchActiveClip(id);
   showToast(`Created animation "${name}"`);
 }
@@ -5920,7 +6057,7 @@ function duplicateActiveClip() {
   const usedIds = new Set(anim.clips.map(c => c.id));
   const name = `${meta.name} Copy`;
   const newId = slugifyClipId(name, usedIds);
-  anim.clips.push({ id: newId, name, duration: meta.duration });
+  anim.clips.push({ id: newId, name, duration: meta.duration, cam: JSON.parse(JSON.stringify(meta.cam || [])), camSmooth: meta.camSmooth });
   objects.forEach(o => {
     if (o.animClips && o.animClips[meta.id]) {
       o.animClips[newId] = JSON.parse(JSON.stringify(o.animClips[meta.id]));
@@ -5943,8 +6080,9 @@ function deleteActiveClip() {
 }
 document.getElementById('anim-clip-delete').addEventListener('click', deleteActiveClip);
 
-function keyTracks(tr, t, p, q, s) {
+function keyTracks(tr, t, p, q, s, o) {
   const ease = anim.defaultEase;
+  if (o) { backfillMatKeys(o); upsertKey(matKeysOf(tr), { t, ...captureMat(o), ease }); }
   upsertKey(tr.pos, { t, x: p.x, y: p.y, z: p.z, ease });
   upsertKey(tr.rot, { t, x: q.x, y: q.y, z: q.z, w: q.w, ease });
   upsertKey(tr.scale, { t, x: s.x, y: s.y, z: s.z, ease });
@@ -5952,16 +6090,16 @@ function keyTracks(tr, t, p, q, s) {
 function setKeyEase(obj, t, ease) {
   pushUndo();
   const tr = obj.animClips && obj.animClips[anim.activeClipId];
-  if (tr) ['pos', 'rot', 'scale'].forEach(tn => tr[tn].forEach(k => { if (Math.abs(k.t - t) < 0.005) k.ease = ease; }));
+  if (tr) TRACKS.forEach(tn => (tr[tn] || []).forEach(k => { if (Math.abs(k.t - t) < 0.005) k.ease = ease; }));
   applyAnimAtTime(anim.time);
-  showToast('Keyframe easing: ' + ease);
+  showToast('Keyframe easing: ' + easeLabel(ease));
 }
 // Auto-key: record a keyframe for everything selected when a gizmo drag finishes.
 transformControls.addEventListener('dragging-changed', (ev) => {
   if (!anim.active || !anim.autoKey) return;
   const sel = [...selectedSet].map(id => objects.find(o => o.id === id)).filter(o => o && o.type !== 'group' && o.mesh);
   if (ev.value) { sel.forEach(ensureAnimBasePose); return; }
-  sel.forEach(o => { const tr = ensureClipTracks(o, anim.activeClipId); keyTracks(tr, anim.time, o.mesh.position, o.mesh.quaternion, o.mesh.scale); });
+  sel.forEach(o => { const tr = ensureClipTracks(o, anim.activeClipId); keyTracks(tr, anim.time, o.mesh.position, o.mesh.quaternion, o.mesh.scale, o); });
   refreshAnimTrackList();
 });
 function addKeyframeForSelected() {
@@ -5973,7 +6111,7 @@ function addKeyframeForSelected() {
   const tr = ensureClipTracks(o, anim.activeClipId);
   const t = anim.time;
   const p = o.mesh.position, q = o.mesh.quaternion, s = o.mesh.scale;
-  keyTracks(tr, t, p, q, s);
+  keyTracks(tr, t, p, q, s, o);
   refreshAnimTrackList();
   showToast(`Keyframe added at ${t.toFixed(2)}s for ${o.name} (${getActiveClipMeta().name})`);
 }
@@ -5989,8 +6127,8 @@ function removeKeyframe(obj, trackName, t) {
   pushUndo();
   const tr = obj.animClips && obj.animClips[anim.activeClipId];
   if (tr) {
-    ['pos', 'rot', 'scale'].forEach(tn => {
-      tr[tn] = tr[tn].filter(k => Math.abs(k.t - t) >= 0.005);
+    TRACKS.forEach(tn => {
+      tr[tn] = (tr[tn] || []).filter(k => Math.abs(k.t - t) >= 0.005);
     });
   }
   refreshAnimTrackList();
@@ -6006,12 +6144,13 @@ function copyKeyframe(obj, t) {
   const tr = obj.animClips && obj.animClips[anim.activeClipId];
   if (!tr) return;
   const findAt = (arr) => arr.find(k => Math.abs(k.t - t) < 0.005) || null;
-  const posKey = findAt(tr.pos), rotKey = findAt(tr.rot), scaleKey = findAt(tr.scale);
-  if (!posKey && !rotKey && !scaleKey) { showToast('No keyframe here to copy', true); return; }
+  const posKey = findAt(tr.pos), rotKey = findAt(tr.rot), scaleKey = findAt(tr.scale), matKey = findAt(tr.mat || []);
+  if (!posKey && !rotKey && !scaleKey && !matKey) { showToast('No keyframe here to copy', true); return; }
   keyframeClipboard = {
     pos: posKey ? { x: posKey.x, y: posKey.y, z: posKey.z } : null,
     rot: rotKey ? { x: rotKey.x, y: rotKey.y, z: rotKey.z, w: rotKey.w } : null,
-    scale: scaleKey ? { x: scaleKey.x, y: scaleKey.y, z: scaleKey.z } : null
+    scale: scaleKey ? { x: scaleKey.x, y: scaleKey.y, z: scaleKey.z } : null,
+    mat: matKey ? { color: matKey.color, img: matKey.img } : null
   };
   showToast(`Copied keyframe at ${t.toFixed(2)}s`);
 }
@@ -6024,6 +6163,7 @@ function pasteKeyframe(obj, t) {
   if (keyframeClipboard.pos) upsertKey(tr.pos, { t, ...keyframeClipboard.pos });
   if (keyframeClipboard.rot) upsertKey(tr.rot, { t, ...keyframeClipboard.rot });
   if (keyframeClipboard.scale) upsertKey(tr.scale, { t, ...keyframeClipboard.scale });
+  if (keyframeClipboard.mat) upsertKey(matKeysOf(tr), { t, ...keyframeClipboard.mat, ease: anim.defaultEase });
   refreshAnimTrackList();
   applyAnimAtTime(anim.time);
   showToast(`Pasted keyframe at ${t.toFixed(2)}s`);
@@ -6057,7 +6197,7 @@ function openKfContextMenu(clientX, clientY, obj, t) {
 
   menu.appendChild(mkItem('Copy keyframe', false, () => copyKeyframe(obj, t)));
   menu.appendChild(mkItem('Paste keyframe here', !keyframeClipboard, () => pasteKeyframe(obj, t)));
-  [['inout','Ease in-out'],['linear','Linear'],['in','Ease in'],['out','Ease out'],['hold','Hold (step)']].forEach(([k, l]) => menu.appendChild(mkItem('Easing: ' + l, false, () => setKeyEase(obj, t, k))));
+  menu.appendChild(mkItem('Easing…  (' + easeLabel(currentEaseAt(obj, t)) + ')', false, () => openEasePicker(clientX, clientY, currentEaseAt(obj, t), (k) => setKeyEase(obj, t, k))));
   menu.appendChild(mkItem('Delete keyframe', false, () => removeKeyframe(obj, null, t)));
 
   document.body.appendChild(menu);
@@ -6109,6 +6249,7 @@ function applyAnimAtTime(t) {
       const v = sampleVecTrack(tr.scale, t);
       o.mesh.scale.set(v.x, v.y, v.z);
     }
+    if (tr.mat && tr.mat.length) applyMatState(o, sampleMat(tr.mat, t));
   });
   selectionOutlines.forEach(helper => helper.update());
 }
@@ -6133,7 +6274,7 @@ function sampleQuatTrack(keys, t) {
   for (let i = 0; i < keys.length - 1; i++) {
     const a = keys[i], b = keys[i + 1];
     if (t >= a.t && t <= b.t) {
-      const f = (b.t - a.t) < 1e-6 ? 0 : (t - a.t) / (b.t - a.t);
+      const f = easeF(a, (b.t - a.t) < 1e-6 ? 0 : (t - a.t) / (b.t - a.t)); // rotation now honours easing too
       const qa = new THREE.Quaternion(a.x, a.y, a.z, a.w);
       const qb = new THREE.Quaternion(b.x, b.y, b.z, b.w);
       qa.slerp(qb, f);
@@ -6146,6 +6287,7 @@ function sampleQuatTrack(keys, t) {
 function setAnimTime(t) {
   anim.time = Math.max(0, Math.min(anim.duration, t));
   applyAnimAtTime(anim.time);
+  applyCameraAtTime(anim.time);
   updateAnimTimeLabel();
   updateScrubBar();
   refreshAnimTrackList(true); // just move playhead, cheap re-render
@@ -6158,6 +6300,7 @@ function updateScrubBar() {
   animScrubFill.style.width = `${pct}%`;
   animScrubHandle.style.left = `${pct}%`;
   updateRangeUI();
+  if (document.body.classList.contains('cinema')) updateCinemaUI();
 }
 
 // ---- Scrubbing: drag the bar, or just scroll the mouse wheel over it/the tracks ----
@@ -6243,7 +6386,7 @@ function updateRangeUI() {
     animRangeLabel.textContent = animRange.in !== null ? `In ${animRange.in.toFixed(2)}s` : (animRange.out !== null ? `Out ${animRange.out.toFixed(2)}s` : '');
   }
 }
-function trackHasKeys(tr) { return !!tr && (tr.pos.length || tr.rot.length || tr.scale.length); }
+function trackHasKeys(tr) { return !!tr && (tr.pos.length || tr.rot.length || tr.scale.length || (tr.mat && tr.mat.length)); }
 
 function getRangeTargets() {
   const ids = new Set();
@@ -6276,6 +6419,18 @@ function sliceTrackRange(keys, a, b, isQuat) {
   return out;
 }
 
+function sliceMatRange(keys, a, b) {
+  if (!keys.length) return [];
+  const eps = 0.005, out = [];
+  const easeAt = (t) => { let e = 'linear'; keys.forEach(k => { if (k.t <= t + 1e-6) e = k.ease || 'linear'; }); return e; };
+  const mk = (t, at) => { const sm = sampleMat(keys, at); const v = { t, color: '#' + sm.color.getHexString(), ease: easeAt(at) }; if (sm.img !== undefined) v.img = sm.img; return v; };
+  const nearA = keys.find(k => Math.abs(k.t - a) < eps);
+  out.push(nearA ? { ...nearA, t: 0 } : mk(0, a));
+  keys.forEach(k => { if (k.t > a + eps && k.t < b - eps) out.push({ ...k, t: k.t - a }); });
+  const nearB = keys.find(k => Math.abs(k.t - b) < eps);
+  out.push(nearB ? { ...nearB, t: b - a } : mk(b - a, b));
+  return out;
+}
 function restPos(o) { return o.animBasePose ? o.animBasePose.pos : o.mesh.position; }
 
 function setRangeIn() {
@@ -6304,7 +6459,8 @@ function copyAnimRange() {
       baseX: base.x, baseY: base.y, baseZ: base.z,
       pos: sliceTrackRange(tr.pos, a, b, false),
       rot: sliceTrackRange(tr.rot, a, b, true),
-      scale: sliceTrackRange(tr.scale, a, b, false)
+      scale: sliceTrackRange(tr.scale, a, b, false),
+      mat: sliceMatRange(tr.mat || [], a, b)
     });
   });
   if (!entries.length) { showToast('No keyframes found for the selected objects', true); return; }
@@ -6360,10 +6516,10 @@ function pasteAnimRange(mirror) {
   jobs.forEach(({ en, target }) => {
     ensureAnimBasePose(target);
     const tr = ensureClipTracks(target, anim.activeClipId);
-    ['pos', 'rot', 'scale'].forEach(name => {
-      const src = en[name];
+    TRACKS.forEach(name => {
+      const src = en[name] || [];
       if (!src.length) return;
-      tr[name] = tr[name].filter(k => k.t < T - 0.005 || k.t > T + len + 0.005); // replace the pasted span
+      tr[name] = (tr[name] || []).filter(k => k.t < T - 0.005 || k.t > T + len + 0.005); // replace the pasted span
       src.forEach(k => {
         const nk = { ...k, t: Math.round((T + k.t) * 1000) / 1000 };
         if (mirror) {
@@ -6417,11 +6573,15 @@ function toggleAnimPlay() {
   animPlayIcon.innerHTML = anim.playing
     ? '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>'
     : '<path d="M8 5v14l11-7z"/>';
+  applyCameraAtTime(anim.time);
+  syncOrbitForPlayback();
+  if (document.body.classList.contains('cinema')) updateCinemaUI();
 }
 animPlayBtn.addEventListener('click', toggleAnimPlay);
 document.getElementById('anim-stop').addEventListener('click', () => {
   anim.playing = false;
   animPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+  syncOrbitForPlayback();
   setAnimTime(0);
 });
 
@@ -6451,8 +6611,8 @@ function shiftKeysOnObject(obj, moves) {
   // moves: [{t0, t1}] — retime every pos/rot/scale key sitting at t0 to t1 in the active clip.
   const tr = obj.animClips && obj.animClips[anim.activeClipId];
   if (!tr) return;
-  ['pos', 'rot', 'scale'].forEach(name => {
-    const arr = tr[name];
+  TRACKS.forEach(name => {
+    const arr = tr[name] || (tr[name] = []);
     const moved = [];
     arr.forEach(k => { const m = moves.find(mv => Math.abs(k.t - mv.t0) < 0.005); if (m) { k.t = m.t1; k.__moved = true; moved.push(k); } });
     // a moved key replaces any untouched key that lands on the same time
@@ -6513,7 +6673,7 @@ function deleteSelectedKeys() {
   pushUndo();
   refs.forEach(r => {
     const tr = r.obj.animClips && r.obj.animClips[anim.activeClipId];
-    if (tr) ['pos', 'rot', 'scale'].forEach(n => { tr[n] = tr[n].filter(k => Math.abs(k.t - r.t) >= 0.005); });
+    if (tr) TRACKS.forEach(n => { tr[n] = (tr[n] || []).filter(k => Math.abs(k.t - r.t) >= 0.005); });
   });
   keySelection.clear();
   refreshAnimTrackList();
@@ -6557,15 +6717,16 @@ function refreshAnimTrackList(playheadOnly=false) {
     });
     return;
   }
-  const animated = objects.filter(o => {
-    const tr = o.animClips && o.animClips[anim.activeClipId];
-    return tr && (tr.pos.length || tr.rot.length || tr.scale.length);
-  });
+  const animated = objects.filter(o => trackHasKeys(o.animClips && o.animClips[anim.activeClipId]));
+  animTrackList.innerHTML = '';
+  appendCameraRow();
   if (animated.length === 0) {
-    animTrackList.innerHTML = '<div class="anim-empty-hint">Select an object, then press <b style="color:var(--text-1)">Add Keyframe</b> to start animating it.</div>';
+    const hint = document.createElement('div');
+    hint.className = 'anim-empty-hint';
+    hint.innerHTML = 'Select an object, then press <b style="color:var(--text-1)">Add Keyframe</b> to start animating it. Orbit the view and press <b style="color:var(--text-1)">Cam key</b> to keyframe the camera.';
+    animTrackList.appendChild(hint);
     return;
   }
-  animTrackList.innerHTML = '';
   animated.forEach(o => {
     const clipTr = o.animClips[anim.activeClipId];
     const row = document.createElement('div');
@@ -6579,13 +6740,18 @@ function refreshAnimTrackList(playheadOnly=false) {
     // All distinct keyframe times across pos/rot/scale for this object, since a user
     // thinks of "a keyframe" as one moment in time, not three separate tracks.
     const times = new Set();
-    ['pos', 'rot', 'scale'].forEach(tn => clipTr[tn].forEach(k => times.add(k.t)));
+    TRACKS.forEach(tn => (clipTr[tn] || []).forEach(k => times.add(k.t)));
     [...times].sort((a,b)=>a-b).forEach(t => {
       const dot = document.createElement('div');
       dot.className = 'anim-key-dot';
       dot.style.left = `${(t / anim.duration) * 100}%`;
       if (keySelSet().has(keyId(o, t))) dot.classList.add('selected');
       dot.title = `${t.toFixed(2)}s — click to select, drag to move, Shift/Ctrl+click to multi-select, Delete to remove, ←/→ to nudge, right-click for more`;
+      const mkey = (clipTr.mat || []).find(k => Math.abs(k.t - t) < 0.005);
+      if (mkey) {
+        dot.title += ` · colour ${mkey.color}${mkey.img ? ' + image' : ''}`;
+        if (!dot.classList.contains('selected')) { dot.style.background = mkey.color; dot.style.borderColor = 'rgba(255,255,255,0.6)'; }
+      }
       dot.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         e.stopPropagation();
@@ -6629,12 +6795,558 @@ function refreshAnimTrackList(playheadOnly=false) {
   });
 }
 
-// Space toggles play/pause while in Animation Mode; K adds a keyframe.
+// ==================================================================
+// ---------------- ANIMATION MODE: ADVANCED (v2) --------------------
+// Material keyframes (colour + image), camera keyframes, extra easing,
+// easing picker, and "Watch" (cinema) playback.
+// ==================================================================
+
+// ---- Easing UI -----------------------------------------------------
+const animEaseSel = document.getElementById('anim-ease');
+animEaseSel.innerHTML = EASE_GROUPS.map(([g, list]) =>
+  `<optgroup label="${g}">${list.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</optgroup>`).join('');
+animEaseSel.value = anim.defaultEase;
+
+function easePreviewSVG(k, color) {
+  const f = EASES[k] || EASES.linear;
+  let d = '';
+  for (let i = 0; i <= 28; i++) {
+    const x = i / 28;
+    const y = Math.max(-0.45, Math.min(1.45, f(x)));
+    d += (i ? 'L' : 'M') + (2 + x * 30).toFixed(1) + ' ' + (18 - (y + 0.45) / 1.9 * 16).toFixed(1);
+  }
+  return `<svg width="34" height="20" viewBox="0 0 34 20" style="flex:none"><path d="${d}" fill="none" stroke="${color || 'currentColor'}" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+}
+
+// Scrollable picker listing every easing with a little curve preview.
+function openEasePicker(clientX, clientY, current, onPick) {
+  closeKfContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'ease-menu';
+  menu.style.left = clientX + 'px';
+  menu.style.top = clientY + 'px';
+  EASE_GROUPS.forEach(([g, list]) => {
+    const h = document.createElement('div');
+    h.className = 'ease-group';
+    h.textContent = g;
+    menu.appendChild(h);
+    list.forEach(([k, l]) => {
+      const row = document.createElement('div');
+      row.className = 'ease-opt' + (k === current ? ' active' : '');
+      row.innerHTML = easePreviewSVG(k) + `<span>${l}</span>`;
+      row.addEventListener('click', (e) => { e.stopPropagation(); closeKfContextMenu(); onPick(k); });
+      menu.appendChild(row);
+    });
+  });
+  menu.addEventListener('click', (e) => e.stopPropagation());
+  document.body.appendChild(menu);
+  kfContextMenuEl = menu;
+  const r = menu.getBoundingClientRect();
+  if (r.right > window.innerWidth) menu.style.left = (window.innerWidth - r.width - 8) + 'px';
+  if (r.bottom > window.innerHeight) menu.style.top = Math.max(8, window.innerHeight - r.height - 8) + 'px';
+  const act = menu.querySelector('.ease-opt.active');
+  if (act) act.scrollIntoView({ block: 'center' });
+  setTimeout(() => document.addEventListener('click', closeKfContextMenu, { once: true }), 0);
+}
+function currentEaseAt(obj, t) {
+  const tr = obj.animClips && obj.animClips[anim.activeClipId];
+  if (!tr) return 'linear';
+  for (const n of TRACKS) { const k = (tr[n] || []).find(k => Math.abs(k.t - t) < 0.005); if (k) return k.ease || 'linear'; }
+  return 'linear';
+}
+
+// Small generic popup (same look as the keyframe menu).
+function openSimpleMenu(clientX, clientY, items) {
+  closeKfContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'modes-menu show';
+  Object.assign(menu.style, { position: 'fixed', top: clientY + 'px', left: clientX + 'px', zIndex: '300', minWidth: '170px' });
+  items.forEach(it => {
+    const el = document.createElement('div');
+    el.className = 'mode-opt';
+    el.style.padding = '7px 10px'; el.style.fontSize = '12px';
+    if (it.disabled) { el.style.opacity = '0.4'; el.style.pointerEvents = 'none'; }
+    el.innerHTML = `<div class="mo-text">${it.label}</div>`;
+    el.addEventListener('click', (e) => { e.stopPropagation(); closeKfContextMenu(); it.onClick(); });
+    menu.appendChild(el);
+  });
+  document.body.appendChild(menu);
+  kfContextMenuEl = menu;
+  const r = menu.getBoundingClientRect();
+  if (r.right > window.innerWidth) menu.style.left = (window.innerWidth - r.width - 8) + 'px';
+  if (r.bottom > window.innerHeight) menu.style.top = (window.innerHeight - r.height - 8) + 'px';
+  setTimeout(() => document.addEventListener('click', closeKfContextMenu, { once: true }), 0);
+}
+
+// ---- Material keyframes: colour + image -----------------------------
+// Each material key stores the object's colour and which image it shows. Images live in a
+// shared library (id -> data URL) so keyframes stay small and every keyframe remembers
+// ITS OWN image/colour: changing the look later never rewrites earlier keyframes.
+const animImgLib = new Map(); // id -> { url, tile, tex, loading, waiters }
+const _mcA = new THREE.Color(), _mcB = new THREE.Color();
+function matKeysOf(tr) { return tr.mat || (tr.mat = []); }
+function matListOf(o) { const m = o.mesh.material; return Array.isArray(m) ? m : [m]; }
+
+function registerAnimTexture(tex) {
+  const ud = tex.userData || (tex.userData = {});
+  if (ud.animImgId && animImgLib.has(ud.animImgId)) return ud.animImgId;
+  for (const [id, e] of animImgLib) {
+    if (e.tex && e.tex.image && e.tex.image === tex.image) { ud.animImgId = id; return id; }
+  }
+  const url = textureToDataURL(tex);
+  if (!url) return null;
+  for (const [id, e] of animImgLib) { if (e.url === url) { ud.animImgId = id; if (!e.tex) e.tex = tex; return id; } }
+  const id = 'img_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
+  animImgLib.set(id, { url, tile: tileData(tex), tex, loading: false, waiters: [] });
+  ud.animImgId = id;
+  return id;
+}
+
+// The object's current look as a keyframe payload.
+function captureMat(o) {
+  const ml = matListOf(o);
+  const key = { color: '#' + ml[0].color.getHexString() };
+  const maps = ml.map(m => m.map || null);
+  if (maps.every(x => !x)) key.img = null;
+  else if (maps.every(x => x && !x.isTextTexture && x.image === maps[0].image)) {
+    const id = registerAnimTexture(maps[0]);
+    if (id) key.img = id;
+  } // per-face / text textures: image isn't animated (img stays undefined = "leave alone")
+  return key;
+}
+
+// Colour blends between keyframes using that key's easing; the IMAGE holds the previous
+// keyframe's picture until the next keyframe is reached, then cuts to the new one.
+function sampleMat(keys, t) {
+  let a, b = null, f = 0;
+  const n = keys.length;
+  if (n === 1 || t <= keys[0].t) a = keys[0];
+  else if (t >= keys[n - 1].t) a = keys[n - 1];
+  else for (let i = 0; i < n - 1; i++) {
+    if (t >= keys[i].t && t <= keys[i + 1].t) {
+      a = keys[i]; b = keys[i + 1];
+      f = easeF(a, (b.t - a.t) < 1e-6 ? 0 : (t - a.t) / (b.t - a.t));
+      break;
+    }
+  }
+  _mcA.set(a.color);
+  if (b) { _mcB.set(b.color); _mcA.lerp(_mcB, Math.max(0, Math.min(1, f))); }
+  const img = (b && t >= b.t) ? b.img : a.img;
+  return { color: _mcA, img };
+}
+
+function withAnimBaseTexture(e, cb) {
+  if (e.tex && e.tex.image) { cb(e.tex); return; }
+  if (e.loading) { e.waiters.push(cb); return; }
+  e.loading = true; e.waiters = [cb];
+  new THREE.TextureLoader().load(e.url, (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    if (e.tile) { tex.userData.tile = true; if (e.tile.w > 0) tex.userData.tileSize = { w: e.tile.w, h: e.tile.h }; }
+    prepareAlphaTexture(tex);
+    e.tex = tex; e.loading = false;
+    const w = e.waiters; e.waiters = [];
+    w.forEach(fn => fn(tex));
+  }, undefined, () => { e.loading = false; e.waiters = []; console.warn('Animation image could not be loaded'); });
+}
+
+function setObjectAnimImage(o, id) {
+  o.animWantImg = id;
+  const ml = matListOf(o);
+  if (id === null) {
+    let changed = false;
+    ml.forEach(m => {
+      if (m.map && !m.map.isTextTexture) { m.map = null; m.alphaTest = 0; m.transparent = m.opacity < 0.99; m.needsUpdate = true; changed = true; }
+    });
+    if (changed) syncCutoutShadow(o.mesh);
+    return;
+  }
+  if (ml.every(m => m.map && m.map.userData && m.map.userData.animImgId === id)) return; // already showing it
+  const e = animImgLib.get(id);
+  if (!e) return;
+  withAnimBaseTexture(e, (base) => {
+    if (o.animWantImg !== id || !o.mesh) return; // a later frame asked for something else
+    const isArr = Array.isArray(o.mesh.material);
+    const cache = o.animTexCache || (o.animTexCache = {});
+    matListOf(o).forEach((m, i) => {
+      if (m.map && m.map.isTextTexture) return;
+      const ck = id + ':' + i;
+      let t = cache[ck];
+      if (!t) {
+        t = base.clone();
+        t.userData = JSON.parse(JSON.stringify(base.userData || {}));
+        t.userData.animImgId = id;
+        t.needsUpdate = true;
+        cache[ck] = t;
+      }
+      applyTextureModeToTexture(t, tileFaceSize(o, i, isArr));
+      m.map = t; m.transparent = true;
+      applyAlphaCutout(m, t);
+    });
+    syncCutoutShadow(o.mesh);
+  });
+}
+
+function applyMatState(o, s) {
+  if (!o.mesh || !o.mesh.material) return;
+  if (!o.animBaseMat) o.animBaseMat = captureMat(o); // remembered so leaving Animation Mode can restore it
+  if (s.color) matListOf(o).forEach(m => m.color.copy(s.color));
+  if (s.img !== undefined) setObjectAnimImage(o, s.img);
+}
+function restoreAnimBaseMat(o) {
+  const b = o.animBaseMat;
+  if (!b || !o.mesh) return;
+  _mcA.set(b.color);
+  matListOf(o).forEach(m => m.color.copy(_mcA));
+  if (b.img !== undefined) setObjectAnimImage(o, b.img);
+  delete o.animBaseMat;
+}
+
+// Make sure EVERY existing keyframe time on this object also has a material key holding the
+// look it had before the change — so earlier keyframes keep their old colour/image.
+function backfillMatKeys(o) {
+  const tr = o.animClips && o.animClips[anim.activeClipId];
+  if (!tr || !o.mesh || !o.mesh.material) return;
+  const times = [];
+  ['pos', 'rot', 'scale'].forEach(n => (tr[n] || []).forEach(k => { if (!times.some(x => Math.abs(x - k.t) < 0.005)) times.push(k.t); }));
+  if (!times.length) return;
+  const mk = matKeysOf(tr);
+  const orig = mk.slice();
+  const base = orig.length ? null : captureMat(o);
+  const add = [];
+  times.sort((a, b) => a - b).forEach(t => {
+    if (orig.some(k => Math.abs(k.t - t) < 0.005)) return;
+    let v;
+    if (base) v = { ...base };
+    else { const s = sampleMat(orig, t); v = { color: '#' + s.color.getHexString() }; if (s.img !== undefined) v.img = s.img; }
+    add.push({ t, ...v, ease: anim.defaultEase });
+  });
+  if (add.length) { add.forEach(k => mk.push(k)); mk.sort((a, b) => a.t - b.t); }
+}
+
+// Inspector hooks (colour / image edits made while in Animation Mode).
+let _animMatHintAt = 0;
+function animMatBeforeEdit(objs) {
+  if (!anim.active) return;
+  objs.forEach(o => { if (o && o.mesh && o.type !== 'group') backfillMatKeys(o); });
+}
+function animMatAfterEdit(objs) {
+  if (!anim.active) return;
+  let keyed = false, hint = false;
+  objs.forEach(o => {
+    if (!o || !o.mesh || o.type === 'group') return;
+    const tr0 = o.animClips && o.animClips[anim.activeClipId];
+    if (anim.autoKey) {
+      const tr = ensureClipTracks(o, anim.activeClipId);
+      upsertKey(matKeysOf(tr), { t: anim.time, ...captureMat(o), ease: anim.defaultEase });
+      keyed = true;
+    } else if (trackHasKeys(tr0)) hint = true;
+  });
+  if (keyed) refreshAnimTrackList();
+  if (hint && performance.now() - _animMatHintAt > 1800) {
+    _animMatHintAt = performance.now();
+    showToast(`Look changed — press K (Add Keyframe) to record it at ${anim.time.toFixed(2)}s`);
+  }
+}
+
+// Project save/load of the image library (only images that keyframes actually use).
+function collectAnimImages() {
+  const used = new Set();
+  objects.forEach(o => {
+    if (!o.animClips) return;
+    Object.values(o.animClips).forEach(tr => (tr.mat || []).forEach(k => { if (k.img) used.add(k.img); }));
+  });
+  const out = {};
+  used.forEach(id => { const e = animImgLib.get(id); if (e) out[id] = { url: e.url, tile: e.tex ? tileData(e.tex) : e.tile }; });
+  return out;
+}
+function loadAnimImages(obj) {
+  if (!obj || typeof obj !== 'object') return;
+  Object.entries(obj).forEach(([id, v]) => {
+    if (!v || !v.url || animImgLib.has(id)) return;
+    animImgLib.set(id, { url: v.url, tile: v.tile || null, tex: null, loading: false, waiters: [] });
+  });
+}
+
+// ---- Camera keyframes ------------------------------------------------
+// Stored on the clip (anim.clips[i].cam) so they follow undo, save/load and clip duplication.
+let camKeySel = null; // time of the selected camera key
+const CAM_FIELDS = ['px', 'py', 'pz', 'tx', 'ty', 'tz', 'fov'];
+function camKeysOf(meta) { meta = meta || getActiveClipMeta(); return meta.cam || (meta.cam = []); }
+function camIsSmooth(meta) { meta = meta || getActiveClipMeta(); return meta.camSmooth !== false; }
+function captureCamKey(t) {
+  const p = camera.position, g = orbit.target;
+  return { t, px: p.x, py: p.y, pz: p.z, tx: g.x, ty: g.y, tz: g.z, fov: camera.fov, ease: anim.defaultEase };
+}
+function sampleCamTrack(keys, t, smooth) {
+  const n = keys.length;
+  if (!n) return null;
+  if (n === 1 || t <= keys[0].t) return keys[0];
+  if (t >= keys[n - 1].t) return keys[n - 1];
+  let i = 0;
+  while (i < n - 2 && t > keys[i + 1].t) i++;
+  const a = keys[i], b = keys[i + 1];
+  const dt = Math.max(1e-6, b.t - a.t);
+  const u = easeF(a, (t - a.t) / dt);
+  const p0 = keys[i - 1] || a, p3 = keys[i + 2] || b;
+  const t0 = keys[i - 1] ? keys[i - 1].t : a.t, t3 = keys[i + 2] ? keys[i + 2].t : b.t;
+  const u2 = u * u, u3 = u2 * u;
+  const h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u, h01 = -2 * u3 + 3 * u2, h11 = u3 - u2;
+  const out = {};
+  CAM_FIELDS.forEach(f => {
+    if (!smooth || f === 'fov') out[f] = a[f] + (b[f] - a[f]) * u;
+    else {
+      // Hermite spline through the keys (tangents scaled by key spacing) = a smooth flowing path
+      const m1 = (b[f] - p0[f]) / Math.max(1e-6, b.t - t0) * dt;
+      const m2 = (p3[f] - a[f]) / Math.max(1e-6, t3 - a.t) * dt;
+      out[f] = h00 * a[f] + h10 * m1 + h01 * b[f] + h11 * m2;
+    }
+  });
+  return out;
+}
+function applyCameraAtTime(t) {
+  if (!anim.active || !anim.camFollow) return false;
+  const keys = camKeysOf();
+  if (!keys.length) return false;
+  const s = sampleCamTrack(keys, t, camIsSmooth());
+  camera.position.set(s.px, s.py, s.pz);
+  orbit.target.set(s.tx, s.ty, s.tz);
+  camera.lookAt(orbit.target);
+  const fov = Math.max(8, Math.min(120, s.fov));
+  if (Math.abs(camera.fov - fov) > 1e-3) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  return true;
+}
+// While a camera track is driving playback the user shouldn't fight it with the mouse.
+function syncOrbitForPlayback() {
+  const lock = anim.active && anim.playing && anim.camFollow && camKeysOf().length > 0;
+  orbit.enabled = !lock;
+}
+
+function addCameraKey() {
+  if (!anim.active) { showToast('Enter Animation Mode first', true); return; }
+  pushUndo();
+  upsertKey(camKeysOf(), captureCamKey(Math.round(anim.time * 1000) / 1000));
+  camKeySel = anim.time;
+  refreshAnimTrackList();
+  showToast(`Camera keyframe at ${anim.time.toFixed(2)}s`);
+}
+function removeCameraKey(t) {
+  pushUndo();
+  const meta = getActiveClipMeta();
+  meta.cam = camKeysOf(meta).filter(k => Math.abs(k.t - t) >= 0.005);
+  if (camKeySel !== null && Math.abs(camKeySel - t) < 0.005) camKeySel = null;
+  refreshAnimTrackList();
+}
+function openCamKeyMenu(clientX, clientY, key) {
+  openSimpleMenu(clientX, clientY, [
+    { label: 'Go to this camera view', onClick: () => setAnimTime(key.t) },
+    { label: 'Set key to current view', onClick: () => { pushUndo(); Object.assign(key, captureCamKey(key.t), { ease: key.ease }); refreshAnimTrackList(); showToast('Camera key updated'); } },
+    { label: `Easing…  (${easeLabel(key.ease || 'linear')})`, onClick: () => openEasePicker(clientX, clientY, key.ease || 'linear', (k) => { pushUndo(); key.ease = k; applyCameraAtTime(anim.time); showToast('Camera easing: ' + easeLabel(k)); }) },
+    { label: 'Delete camera key', onClick: () => removeCameraKey(key.t) },
+  ]);
+}
+function beginCamKeyDrag(e, key, lane) {
+  camKeySel = key.t;
+  keySelection.clear();
+  refreshAnimTrackList();
+  const startX = e.clientX, rect = lane.getBoundingClientRect(), t0 = key.t;
+  let dragging = false;
+  const onMove = (ev) => {
+    const dx = ev.clientX - startX;
+    if (!dragging && Math.abs(dx) < 4) return;
+    if (!dragging) { dragging = true; pushUndo(); }
+    const keys = camKeysOf();
+    const nt = Math.max(0, Math.min(anim.duration, Math.round((t0 + dx / rect.width * anim.duration) * 100) / 100));
+    if (keys.some(k => k !== key && Math.abs(k.t - nt) < 0.005)) return;
+    key.t = nt; keys.sort((a, b) => a.t - b.t); camKeySel = nt;
+    refreshAnimTrackList();
+  };
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    if (dragging) { animKeyJustDragged = true; setTimeout(() => { animKeyJustDragged = false; }, 60); applyCameraAtTime(anim.time); }
+    else setAnimTime(key.t); // plain click jumps to that key and its camera view
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+function appendCameraRow() {
+  const row = document.createElement('div');
+  row.className = 'anim-track-row';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'anim-track-name';
+  nameEl.style.color = 'var(--blue)';
+  nameEl.textContent = 'Camera';
+  const lane = document.createElement('div');
+  lane.className = 'anim-track-lane';
+  camKeysOf().forEach(k => {
+    const dot = document.createElement('div');
+    dot.className = 'anim-key-dot cam-dot' + (camKeySel !== null && Math.abs(camKeySel - k.t) < 0.005 ? ' selected' : '');
+    dot.style.left = `${(k.t / anim.duration) * 100}%`;
+    dot.title = `Camera key ${k.t.toFixed(2)}s (${easeLabel(k.ease || 'linear')}) — click to jump, drag to move, right-click for more`;
+    dot.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); beginCamKeyDrag(e, k, lane); });
+    dot.addEventListener('click', (e) => e.stopPropagation());
+    dot.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); openCamKeyMenu(e.clientX, e.clientY, k); });
+    lane.appendChild(dot);
+  });
+  const ph = document.createElement('div');
+  ph.className = 'anim-playhead';
+  ph.style.left = `${(anim.time / anim.duration) * 100}%`;
+  lane.appendChild(ph);
+  lane.addEventListener('click', (e) => {
+    if (animKeyJustDragged) return;
+    const rect = lane.getBoundingClientRect();
+    setAnimTime(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * anim.duration);
+    if (camKeySel !== null) { camKeySel = null; refreshAnimTrackList(); }
+  });
+  lane.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const rect = lane.getBoundingClientRect();
+    const t = Math.round(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * anim.duration * 100) / 100;
+    openSimpleMenu(e.clientX, e.clientY, [{ label: `Add camera key (current view) at ${t.toFixed(2)}s`, onClick: () => { pushUndo(); upsertKey(camKeysOf(), captureCamKey(t)); camKeySel = t; refreshAnimTrackList(); } }]);
+  });
+  row.appendChild(nameEl); row.appendChild(lane);
+  animTrackList.appendChild(row);
+}
+// Delete removes a selected camera key (capture phase, so the scene object isn't deleted instead).
+window.addEventListener('keydown', (e) => {
+  if (!anim.active || camKeySel === null) return;
+  if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+  if (e.key === 'Delete' || e.key === 'Backspace') { removeCameraKey(camKeySel); e.preventDefault(); e.stopImmediatePropagation(); }
+  else if (e.key === 'Escape') { camKeySel = null; refreshAnimTrackList(); e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+
+const camFollowBtn = document.getElementById('anim-cam-follow');
+const camSmoothBtn = document.getElementById('anim-cam-smooth');
+function refreshCamButtons() {
+  camFollowBtn.classList.toggle('active', anim.camFollow);
+  camSmoothBtn.classList.toggle('active', camIsSmooth());
+}
+document.getElementById('anim-cam-key').addEventListener('click', addCameraKey);
+camFollowBtn.addEventListener('click', () => {
+  anim.camFollow = !anim.camFollow;
+  refreshCamButtons();
+  syncOrbitForPlayback();
+  if (anim.camFollow) applyCameraAtTime(anim.time);
+  showToast(anim.camFollow ? 'Camera follows its keyframes' : 'Camera is free (keyframes ignored)');
+});
+camSmoothBtn.addEventListener('click', () => {
+  pushUndo();
+  const meta = getActiveClipMeta();
+  meta.camSmooth = !camIsSmooth();
+  refreshCamButtons();
+  applyCameraAtTime(anim.time);
+  showToast(meta.camSmooth ? 'Camera path: smooth curve' : 'Camera path: straight lines');
+});
+
+// ---- Watch (cinema) mode -----------------------------------------------
+// Hides every panel and editor helper, plays the clip from the start with the camera track,
+// and shows a minimal video-style control bar that fades out while it plays.
+const cinema = { active: false, bars: false, wasAttached: null, hideT: null };
+const cinUI = document.getElementById('cinema-ui');
+const cinBarTop = document.getElementById('cin-bar-top'), cinBarBot = document.getElementById('cin-bar-bot');
+const cinFill = document.getElementById('cin-fill'), cinTime = document.getElementById('cin-time');
+const cinPlayIcon = document.getElementById('cin-play-icon');
+const fmtClock = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`; };
+
+const _origSelectObject = selectObject;
+selectObject = function (obj, mode) { if (cinema.active) return; return _origSelectObject(obj, mode); };
+
+function updateCinemaUI() {
+  if (!cinema.active) return;
+  cinFill.style.width = (anim.duration > 0 ? anim.time / anim.duration * 100 : 0) + '%';
+  cinTime.textContent = `${fmtClock(anim.time)} / ${fmtClock(anim.duration)}`;
+  cinPlayIcon.innerHTML = anim.playing
+    ? '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>'
+    : '<path d="M8 5v14l11-7z"/>';
+}
+function showCinemaUI() {
+  cinUI.classList.remove('cin-hide');
+  wrap.style.cursor = '';
+  clearTimeout(cinema.hideT);
+  cinema.hideT = setTimeout(() => {
+    if (cinema.active && anim.playing && !cinUI.matches(':hover')) { cinUI.classList.add('cin-hide'); wrap.style.cursor = 'none'; }
+  }, 2200);
+}
+function layoutCinemaBars() {
+  if (!cinema.active || !cinema.bars) { cinBarTop.style.height = cinBarBot.style.height = '0px'; return; }
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const h = Math.max(0, (H - W / 2.39) / 2);
+  cinBarTop.style.height = cinBarBot.style.height = h + 'px';
+}
+function cinemaHideHelpers() {
+  grid.visible = false;
+  frontLabelSprite.visible = false;
+  resizeHandleGroup.visible = false;
+  selectionOutlines.forEach(h => { h.visible = false; });
+}
+function enterCinema() {
+  if (!anim.active) { showToast('Enter Animation Mode first', true); return; }
+  if (cinema.active) return;
+  cinema.active = true;
+  cinema.wasAttached = transformControls.object || null;
+  transformControls.detach();
+  closeKfContextMenu();
+  document.body.classList.add('cinema');
+  try { const el = document.documentElement; if (el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen().catch(() => {}); } catch (e) {}
+  window.dispatchEvent(new Event('resize'));
+  layoutCinemaBars();
+  setAnimTime(0);
+  if (!anim.playing) toggleAnimPlay(); else anim.lastFrameAt = performance.now();
+  updateCinemaUI();
+  showCinemaUI();
+}
+function exitCinema() {
+  if (!cinema.active) return;
+  cinema.active = false;
+  clearTimeout(cinema.hideT);
+  document.body.classList.remove('cinema');
+  wrap.style.cursor = '';
+  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  grid.visible = true; frontLabelSprite.visible = true;
+  selectionOutlines.forEach(h => { h.visible = true; });
+  if (cinema.wasAttached) { try { transformControls.attach(cinema.wasAttached); } catch (e) {} }
+  cinema.wasAttached = null;
+  if (anim.active && anim.playing) toggleAnimPlay();
+  cinBarTop.style.height = cinBarBot.style.height = '0px';
+  window.dispatchEvent(new Event('resize'));
+}
+document.getElementById('anim-watch').addEventListener('click', enterCinema);
+document.getElementById('cin-play').addEventListener('click', () => { toggleAnimPlay(); updateCinemaUI(); showCinemaUI(); });
+document.getElementById('cin-exit').addEventListener('click', exitCinema);
+document.getElementById('cin-bars').addEventListener('click', (e) => {
+  cinema.bars = !cinema.bars;
+  e.currentTarget.classList.toggle('active', cinema.bars);
+  layoutCinemaBars();
+});
+(function () {
+  const bar = document.getElementById('cin-bar');
+  let down = false;
+  const seek = (ev) => { const r = bar.getBoundingClientRect(); setAnimTime(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * anim.duration); };
+  bar.addEventListener('pointerdown', (ev) => { down = true; bar.setPointerCapture(ev.pointerId); seek(ev); });
+  bar.addEventListener('pointermove', (ev) => { if (down) seek(ev); });
+  bar.addEventListener('pointerup', () => { down = false; });
+})();
+wrap.addEventListener('mousemove', () => { if (cinema.active) showCinemaUI(); });
+let _cinDown = null;
+wrap.addEventListener('pointerdown', (e) => { if (cinema.active) _cinDown = { x: e.clientX, y: e.clientY, onCanvas: e.target === canvas }; });
+wrap.addEventListener('pointerup', (e) => {
+  if (!cinema.active || !_cinDown) return;
+  const moved = Math.hypot(e.clientX - _cinDown.x, e.clientY - _cinDown.y) > 5;
+  if (_cinDown.onCanvas && !moved) { toggleAnimPlay(); updateCinemaUI(); showCinemaUI(); }
+  _cinDown = null;
+});
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && cinema.active) exitCinema(); });
+window.addEventListener('keydown', (e) => {
+  if (cinema.active && e.key === 'Escape') { exitCinema(); e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+
+
+// Space toggles play/pause while in Animation Mode; K adds a keyframe (Shift+K adds a camera keyframe).
 window.addEventListener('keydown', (e) => {
   if (!anim.active) return;
   if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
   if (e.key === ' ') { e.preventDefault(); toggleAnimPlay(); }
-  if (e.key === 'k' || e.key === 'K') { e.preventDefault(); addKeyframeForSelected(); }
+  if (e.key === 'k' || e.key === 'K') { e.preventDefault(); if (e.shiftKey) addCameraKey(); else addKeyframeForSelected(); }
 });
 
 // Builds one THREE.AnimationClip per (registered animation clip), merging every
@@ -6653,8 +7365,8 @@ function bakeKeys(keys, isQuat) {
     const a = keys[i], b = keys[i + 1];
     out.push(a);
     if (a.ease === 'hold') { if (b.t - a.t > 0.002) out.push({ ...a, t: b.t - 0.001 }); continue; }
-    if (a.ease && a.ease !== 'linear') for (let n = 1; n < 12; n++) {
-      const t = a.t + (b.t - a.t) * n / 12, v = isQuat ? sampleQuatTrack(keys, t) : sampleVecTrack(keys, t);
+    if (a.ease && a.ease !== 'linear') for (let N = easeSamples(a.ease), n = 1; n < N; n++) {
+      const t = a.t + (b.t - a.t) * n / N, v = isQuat ? sampleQuatTrack(keys, t) : sampleVecTrack(keys, t);
       out.push({ t, x: v.x, y: v.y, z: v.z, w: v.w });
     }
   }
@@ -6814,6 +7526,7 @@ function onResize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
+  if (document.body.classList.contains('cinema')) layoutCinemaBars();
 }
 window.addEventListener('resize', onResize);
 
@@ -6821,6 +7534,7 @@ function animate() {
   requestAnimationFrame(animate);
   orbit.update();
   updateResizeHandles();
+  if (document.body.classList.contains('cinema')) cinemaHideHelpers();
   updateTiledTextures();
   if (scaleSizePanelVisible()) updateScaleSizePanel();
   selectionOutlines.forEach(helper => helper.update());
@@ -6837,9 +7551,11 @@ function animate() {
         anim.time = anim.duration;
         anim.playing = false;
         animPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+        syncOrbitForPlayback();
       }
     }
     applyAnimAtTime(anim.time);
+    applyCameraAtTime(anim.time);
     updateAnimTimeLabel();
     updateScrubBar();
     refreshAnimTrackList(true);
