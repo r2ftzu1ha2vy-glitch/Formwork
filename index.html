@@ -2827,7 +2827,13 @@ function focusCameraOnSelection() {
 // ---- Edge-to-edge snapping helpers (used on top of grid snapping) ----
 // When snap-to-grid is on, moving or resizing a part close enough to a neighboring
 // part's edge will snap flush against it, in addition to the regular grid increments.
-const EDGE_SNAP_THRESHOLD = 0.3; // world units - how close an edge needs to be to trigger a snap
+// World units - how close an edge needs to be to trigger a snap. Scales with the move increment:
+// the nearest grid position to a flush spot can be up to half an increment away, so the pull
+// range must be at least that or parts with off-grid sizes can never sit flush.
+function edgeSnapThreshold() {
+  const inc = (typeof moveSnapAmount === 'number' && moveSnapAmount > 0) ? moveSnapAmount : 0.5;
+  return Math.min(Math.max(0.3, inc * 0.5 + 0.1), inc * 0.95);
+}
 let resizeSnapPrevBox = null;
 
 function boxesOverlapOtherAxes(a, b, axis, margin=0.02) {
@@ -2842,7 +2848,7 @@ function computeFaceSnapDelta(box, candidates, axis, face) {
   candidates.forEach(cbox => {
     if (!boxesOverlapOtherAxes(box, cbox, axis)) return;
     const d = face === 'max' ? (cbox.min[axis] - box.max[axis]) : (cbox.max[axis] - box.min[axis]);
-    if (Math.abs(d) < EDGE_SNAP_THRESHOLD && (best === null || Math.abs(d) < Math.abs(best))) best = d;
+    if (Math.abs(d) <= edgeSnapThreshold() && (best === null || Math.abs(d) < Math.abs(best))) best = d;
   });
   return best;
 }
@@ -2943,7 +2949,11 @@ transformControls.addEventListener('objectChange', () => {
           if (i === 0) movingBox.copy(b); else movingBox.union(b);
         });
         const others = objects.filter(o => !movingIds.has(o.id)).map(o => new THREE.Box3().setFromObject(o.mesh));
+        // Only snap the axes the gizmo is actually dragging, so dragging along X can't
+        // nudge the part sideways on Y/Z and fight the grid.
+        const gAxis = String(transformControls.axis || '').toUpperCase();
         ['x','y','z'].forEach(axis => {
+          if (gAxis && !gAxis.includes(axis.toUpperCase())) return;
           const d = computeEdgeSnapDelta(movingBox, others, axis);
           if (d !== null) {
             target.position[axis] += d;
