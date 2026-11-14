@@ -470,6 +470,7 @@
     overflow:hidden;
   }
   #three-canvas{ display:block; width:100%; height:100%; }
+  #canvas-wrap.drop-hot{ outline:2px dashed var(--accent); outline-offset:-8px; }
 
   .viewport-badge{
     position:absolute; top:12px; left:14px;
@@ -942,11 +943,11 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18" stroke-dasharray="2 2" opacity="0.5"/><path d="M8 6l4-3 4 3M8 18l4 3 4-3"/></svg>
       <span class="btn-label">Flip Z</span>
     </button>
-    <button class="btn" id="btn-import" title="Import (.glb/.gltf/.obj)">
+    <button class="btn" id="btn-import" title="Import model (.glb / .gltf / .obj / .zip) — or drag & drop files onto the viewport">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/></svg>
       <span class="btn-label">Import</span>
     </button>
-    <input type="file" id="file-import" accept=".glb,.gltf,.obj" style="display:none">
+    <input type="file" id="file-import" accept=".glb,.gltf,.obj,.zip,.bin,.mtl,.png,.jpg,.jpeg,.webp,.gif,.bmp,.ktx2" multiple style="display:none">
     <button class="btn" id="btn-load-project" title="Load a saved project (.json)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-8l-2-2H5a2 2 0 0 0-2 2z"/></svg>
       <span class="btn-label">Load</span>
@@ -1331,6 +1332,7 @@
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "jszip": "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm",
     "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
     "firebase/database": "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js"
   }
@@ -1346,6 +1348,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import JSZip from 'jszip';
 import { initializeApp } from 'firebase/app';
 import {
   getDatabase, ref, set, update, remove, onValue, onChildAdded,
@@ -1893,6 +1898,7 @@ function snapshotOneObject(o, useWorldTransform) {
       rot = o.mesh.rotation.toArray().slice(0,3);
       scale = o.mesh.scale.toArray();
     }
+    if (o.type === 'model') return snapshotModel(o, pos, rot, scale);
     const isMulti = Array.isArray(o.mesh.material);
     const primary = isMulti ? o.mesh.material[0] : o.mesh.material;
     return {
@@ -1999,13 +2005,19 @@ function restoreScene(snap) {
     document.getElementById('btn-modes').classList.remove('active');
   }
   // clear current
-  objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); disposeMaterial(o.mesh.material); });
+  objects.forEach(o => {
+    scene.remove(o.mesh);
+    if (o.type === 'model') { disposeModelObject(o); return; }
+    if (o.mesh.geometry) o.mesh.geometry.dispose();
+    if (o.mesh.material) disposeMaterial(o.mesh.material);
+  });
   objects = [];
   transformControls.detach();
   selected = null; selectedSet.clear();
 
   const geoLoader = new THREE.BufferGeometryLoader();
   snap.forEach(s => {
+    if (s.type === 'model') { restoreModelFromSnapshot(s); return; }
     const geo = parseGeometryJSON(s.geomJSON, geoLoader);
     const opac = s.opacity ?? 1;
     const baseSide = (s.type==='plane' || s.type==='text' || s.type==='ring') ? THREE.DoubleSide : THREE.FrontSide;
@@ -2237,6 +2249,14 @@ function deleteObject(obj) {
     selectedSet.delete(obj.id);
     return;
   }
+  if (obj.type === 'model') {
+    disposeModelObject(obj);
+    scene.remove(obj.mesh);
+    removeSelectionOutlineFor(obj.id);
+    objects = objects.filter(o => o.id !== obj.id);
+    selectedSet.delete(obj.id);
+    return;
+  }
   scene.remove(obj.mesh);
   obj.mesh.geometry.dispose();
   disposeMaterial(obj.mesh.material);
@@ -2420,6 +2440,7 @@ function duplicateSelected() {
   const newObjs = ids.map(id => {
     const obj = objects.find(o => o.id === id);
     if (!obj) return null;
+    if (obj.type === 'model') return duplicateModel(obj);
     return obj.type === 'group' ? duplicateGroup(obj) : duplicateObject(obj);
   }).filter(Boolean);
   setSelection(newObjs);
@@ -2440,6 +2461,11 @@ function copySelected() {
       const members = objects.filter(o => memberIds.has(o.id));
       if (members.length === 0) return null;
       return { isGroup: true, name: obj.name, members: members.map(m => cloneMeshDataFor(m)) };
+    }
+    if (obj.type === 'model') {
+      return { isModel: true, modelId: obj.modelId, name: obj.name, collision: obj.collision,
+        pos: obj.mesh.position.clone(), quat: obj.mesh.quaternion.clone(), scale: obj.mesh.scale.clone(),
+        clipIndex: obj.clipIndex, playing: obj.playing, speed: obj.speed, loop: obj.loop };
     }
     return cloneMeshDataFor(obj);
   }).filter(Boolean);
@@ -2475,6 +2501,14 @@ function pasteClipboard() {
       newTopLevel.push(newGroup || copies[0]);
       // Nudge this clipboard group's stored positions forward for the next paste
       nextClipboard.push({ ...entry, members: entry.members.map((data, i) => ({ ...data, pos: copies[i].mesh.position.clone() })) });
+    } else if (entry.isModel) {
+      const newObj = addModelObject(entry.modelId, {
+        name: entry.name + ' copy', collision: entry.collision,
+        position: entry.pos.clone().add(offset), quaternion: entry.quat.clone(), scale: entry.scale.clone(),
+        clipIndex: entry.clipIndex, playing: entry.playing, speed: entry.speed, loop: entry.loop
+      });
+      newTopLevel.push(newObj);
+      nextClipboard.push({ ...entry, pos: newObj.mesh.position.clone() });
     } else {
       const newObj = createObjectFromClone(entry, entry.pos.clone().add(offset));
       newTopLevel.push(newObj);
@@ -2655,6 +2689,16 @@ function flipSelection(axis) {
 
   selObjs.forEach(o => {
     const mesh = o.mesh;
+
+    // Models / groups have no geometry of their own: mirror via a negative scale instead
+    // (three.js flips the winding automatically when the world matrix is mirrored).
+    if (!mesh.geometry) {
+      const relM = mesh.position.clone().sub(center);
+      relM[axis] = -relM[axis];
+      mesh.position.copy(center).add(relM);
+      mesh.scale[axis] *= -1;
+      return;
+    }
 
     // Mirror the geometry itself so triangle winding stays correct (a naive
     // negative scale alone would turn the mesh inside-out under lighting).
@@ -3033,6 +3077,20 @@ function refreshOutliner() {
       return;
     }
 
+    if (obj.type === 'model') {
+      const mrec = modelStore.get(obj.modelId);
+      const nClips = (mrec && mrec.parsed) ? mrec.parsed.animations.length : 0;
+      row.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${iconFor('imported')}</svg>
+        <span class="name">${_escHtml(obj.name)}${obj.content ? '' : ' <span style="opacity:0.5">(loading…)</span>'}</span>
+        ${nClips ? `<span style="font-size:9px; color:var(--accent); border:1px solid var(--accent); border-radius:3px; padding:1px 4px; margin-right:4px; flex-shrink:0;" title="${nClips} animation clip${nClips !== 1 ? 's' : ''}">ANIM</span>` : ''}
+        ${obj.collision === false ? '<span style="font-size:9px; color:var(--text-2); border:1px solid var(--line); border-radius:3px; padding:1px 4px; margin-right:4px; flex-shrink:0;" title="No collision — player passes through in-game">NC</span>' : ''}
+      `;
+      row.querySelectorAll('svg, .name').forEach(el => el.addEventListener('click', (e) => selectObject(obj, selectModeFromEvent(e))));
+      outlinerEl.appendChild(row);
+      return;
+    }
+
     const rowMat = Array.isArray(obj.mesh.material) ? obj.mesh.material[0] : obj.mesh.material;
     const isGhosted = rowMat.opacity < 0.99;
     row.innerHTML = `
@@ -3099,6 +3157,7 @@ function updateStats() {
   objects.forEach(o => {
     if (o.type === 'group') return; // groups are THREE.Group wrappers with no geometry of their own —
                                       // their triangles are already counted via their member objects
+    if (o.type === 'model') { tris += modelStats(o).tris; return; }
     const pos = o.mesh.geometry.attributes.position;
     tris += o.mesh.geometry.index ? o.mesh.geometry.index.count/3 : pos.count/3;
   });
@@ -3131,6 +3190,8 @@ function refreshInspector() {
     return;
   }
   const o = selected;
+
+  if (o.type === 'model') { renderModelInspector(o); return; }
 
   if (o.type === 'group') {
     // Groups have no material to edit — just name, transform, and an ungroup action.
@@ -3758,7 +3819,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   const ndc = screenToNDC(e.clientX, e.clientY);
   mouse.set(ndc.x, ndc.y);
   raycaster.setFromCamera(mouse, camera);
-  const hits = raycaster.intersectObjects(objects.map(o=>o.mesh), false);
+  const hits = raycastObjects();
   if (hits.length === 0) {
     boxStartClient = {x:e.clientX, y:e.clientY};
   }
@@ -3821,6 +3882,21 @@ window.addEventListener('pointerup', (e) => {
   boxStartClient = null;
 });
 
+// Plain meshes are hit-tested directly; imported models are whole scene graphs, so their
+// children are searched recursively and reported as a hit on the model's wrapper object.
+function raycastObjects() {
+  const flat = [], hits = [];
+  objects.forEach(o => {
+    if (o.type === 'model') {
+      const h = raycaster.intersectObject(o.mesh, true)[0];
+      if (h) hits.push({ distance: h.distance, object: o.mesh, point: h.point });
+    } else flat.push(o.mesh);
+  });
+  hits.push(...raycaster.intersectObjects(flat, false));
+  hits.sort((a, b) => a.distance - b.distance);
+  return hits;
+}
+
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (editMode.active) return;
   if (!downPos || boxSelecting) { downPos = null; return; }
@@ -3830,8 +3906,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const ndc = screenToNDC(e.clientX, e.clientY);
   mouse.set(ndc.x, ndc.y);
   raycaster.setFromCamera(mouse, camera);
-  const meshes = objects.map(o => o.mesh);
-  const hits = raycaster.intersectObjects(meshes, false);
+  const hits = raycastObjects();
   if (hits.length > 0) {
     let obj = objects.find(o => o.mesh === hits[0].object);
     // If the hit mesh belongs to a group, clicking it selects the group as a whole —
@@ -3847,8 +3922,619 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   }
 });
 
-// ---------------- IMPORT ----------------
-// ---------------- IMPORTED ANIMATION BAKING ----------------
+// ==================================================================
+// ---------------- MODEL IMPORT (whole models, rigs, .zip) ----------------
+// ==================================================================
+// Imported files now come in as ONE "model" object: the whole scene graph is kept
+// exactly as authored (hierarchy, skeletons, PBR materials with normal / emissive /
+// metal-rough maps, vertex colours) and any embedded animation clips are playable
+// from the inspector. Previously every mesh node was split into a loose, static
+// object with only its base-colour texture, which is why rigged / Sketchfab models
+// arrived as dead, flat-looking meshes.
+//
+// Accepted input:  .glb  .gltf (+ .bin + textures)  .obj (+ .mtl + textures)  .zip of any of those
+// Several loose files can be picked / dropped together; they are bundled so the model can find
+// its sidecar files (textures, .bin, .mtl) and so the whole thing can be stored in a saved project.
+
+const modelStore = new Map(); // modelId -> record { id, name, kind, bytes, entry, fit, parsed, loading }
+const MODEL_EXT_RE = /\.(glb|gltf|obj)$/i;
+const TRANSPARENT_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+function newModelId() { return 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+const _normPath = (p) => {
+  const out = [];
+  String(p).replace(/\\/g, '/').split('/').forEach(seg => {
+    if (!seg || seg === '.') return;
+    if (seg === '..') out.pop(); else out.push(seg);
+  });
+  return out.join('/');
+};
+const _dirOf = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
+const _baseOf = (p) => p.slice(p.lastIndexOf('/') + 1);
+const _extOf = (p) => { const m = /\.([a-z0-9]+)$/i.exec(p); return m ? m[1].toLowerCase() : ''; };
+const _mimeFor = (ext) => ({
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+  bmp: 'image/bmp', ktx2: 'image/ktx2', bin: 'application/octet-stream', mtl: 'text/plain'
+}[ext] || 'application/octet-stream');
+
+function bufToB64(buf) {
+  const u8 = new Uint8Array(buf);
+  let s = '';
+  const CH = 0x8000;
+  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+  return btoa(s);
+}
+function b64ToBuf(b64) {
+  const s = atob(b64);
+  const u8 = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+  return u8.buffer;
+}
+
+// Pick the file inside a zip that should be loaded as "the model": glb > gltf > obj,
+// shallowest path first, so a zip that also contains previews / extra formats still works.
+function pickModelEntry(paths) {
+  const rank = { glb: 0, gltf: 1, obj: 2 };
+  const cands = paths.filter(p => MODEL_EXT_RE.test(p))
+    .sort((a, b) => (rank[_extOf(a)] - rank[_extOf(b)]) || (a.split('/').length - b.split('/').length) || a.localeCompare(b));
+  return cands[0] || null;
+}
+
+// Bounds of a loaded scene in its REST pose (skinned meshes included, which Box3.setFromObject
+// gets wrong because it only looks at the un-skinned bind geometry).
+function computeModelBounds(root) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  root.traverse(c => {
+    if (!c.isMesh || !c.geometry) return;
+    const pos = c.geometry.attributes.position;
+    if (!pos) return;
+    if (c.isSkinnedMesh) c.skeleton.update();
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      if (c.isSkinnedMesh) c.applyBoneTransform(i, v);
+      v.applyMatrix4(c.matrixWorld);
+      box.expandByPoint(v);
+    }
+  });
+  return box;
+}
+
+function finalizeParsedScene(root) {
+  root.traverse(c => {
+    if (!c.isMesh) return;
+    c.castShadow = true;
+    c.receiveShadow = true;
+    if (c.isSkinnedMesh) c.frustumCulled = false; // bind-pose bounds are wrong once it animates
+    if (c.geometry && !c.geometry.attributes.normal) c.geometry.computeVertexNormals();
+  });
+}
+
+// Reads a record (raw glb / gltf / obj, or a zip) into { scene, animations }. Cached on the record,
+// so duplicates / undo / redo never parse twice.
+function parseModelRecord(rec) {
+  if (rec.parsed) return Promise.resolve(rec.parsed);
+  if (rec.loading) return rec.loading;
+  rec.loading = (async () => {
+    const lookup = new Map();     // lowercased path inside the bundle -> blob URL
+    const baseLookup = new Map(); // lowercased file name -> blob URL (fallback for odd relative paths)
+    let entryExt = rec.kind, entryBuf = null, entryDir = '', mtlText = null;
+
+    if (rec.kind === 'zip') {
+      const zip = await JSZip.loadAsync(rec.bytes);
+      const files = Object.values(zip.files).filter(f =>
+        !f.dir && !/(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db)(\/|$)/.test(f.name) && !/(^|\/)\._/.test(f.name));
+      if (!rec.entry || !files.some(f => f.name === rec.entry)) rec.entry = pickModelEntry(files.map(f => f.name));
+      if (!rec.entry) throw new Error('No .glb, .gltf or .obj file found inside the zip');
+      entryExt = _extOf(rec.entry);
+      entryDir = _dirOf(rec.entry);
+      const mtlCandidates = [];
+      for (const f of files) {
+        const buf = await f.async('arraybuffer');
+        const path = _normPath(f.name);
+        if (f.name === rec.entry) { entryBuf = buf; continue; }
+        if (_extOf(path) === 'mtl') mtlCandidates.push({ path, buf });
+        const url = URL.createObjectURL(new Blob([buf], { type: _mimeFor(_extOf(path)) }));
+        lookup.set(path.toLowerCase(), url);
+        if (!baseLookup.has(_baseOf(path).toLowerCase())) baseLookup.set(_baseOf(path).toLowerCase(), url);
+      }
+      if (entryExt === 'obj' && mtlCandidates.length) {
+        const stem = _baseOf(rec.entry).replace(/\.obj$/i, '').toLowerCase();
+        const pick = mtlCandidates.find(m => _baseOf(m.path).toLowerCase() === stem + '.mtl')
+          || mtlCandidates.find(m => _dirOf(m.path) === _normPath(entryDir)) || mtlCandidates[0];
+        mtlText = new TextDecoder().decode(pick.buf);
+      }
+    } else {
+      entryBuf = rec.bytes;
+    }
+
+    const resolve = (url) => {
+      if (/^(data:|blob:|https?:|\/\/)/i.test(url)) return url;
+      let p = url.split('?')[0].split('#')[0];
+      try { p = decodeURIComponent(p); } catch (e) { /* keep as is */ }
+      const rel = _normPath(p);
+      const hit = lookup.get(_normPath(entryDir ? entryDir + '/' + rel : rel).toLowerCase())
+        || lookup.get(rel.toLowerCase())
+        || baseLookup.get(_baseOf(rel).toLowerCase());
+      if (hit) return hit;
+      console.warn('[import] file referenced by the model was not found:', url);
+      return /\.(png|jpe?g|webp|gif|bmp)$/i.test(rel) ? TRANSPARENT_PNG : url;
+    };
+    const manager = new THREE.LoadingManager();
+    manager.setURLModifier(resolve);
+
+    let scene, animations = [];
+    if (entryExt === 'glb' || entryExt === 'gltf') {
+      const loader = new GLTFLoader(manager);
+      loader.setDRACOLoader(dracoLoader);
+      const k = new KTX2Loader(manager);
+      k.setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/');
+      k.detectSupport(renderer);
+      loader.setKTX2Loader(k);
+      const data = entryExt === 'gltf' ? new TextDecoder().decode(entryBuf) : entryBuf;
+      const gltf = await loader.parseAsync(data, '');
+      scene = gltf.scene || gltf.scenes[0];
+      animations = gltf.animations || [];
+      k.dispose();
+    } else if (entryExt === 'obj') {
+      const objLoader = new OBJLoader(manager);
+      if (mtlText) {
+        const mtlLoader = new MTLLoader(manager);
+        mtlLoader.setResourcePath('');
+        const mats = mtlLoader.parse(mtlText, '');
+        mats.preload();
+        objLoader.setMaterials(mats);
+      }
+      scene = objLoader.parse(new TextDecoder().decode(entryBuf));
+    } else {
+      throw new Error('Unsupported model type: ' + entryExt);
+    }
+    finalizeParsedScene(scene);
+
+    if (!rec.fit) {
+      // Auto-fit: models authored at a wildly different scale (Sketchfab downloads are often in
+      // centimetres or sit 100 units tall) come in at a sane size, standing on the grid, centred.
+      const box = computeModelBounds(scene);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      let s = 1;
+      if (box.isEmpty() || !isFinite(maxDim) || maxDim <= 0) s = 1;
+      else if (maxDim < 0.5 || maxDim > 10) s = 4 / maxDim;
+      const c = box.getCenter(new THREE.Vector3());
+      rec.fit = box.isEmpty()
+        ? { scale: 1, offset: [0, 0, 0], size: [2, 2, 2] }
+        : { scale: s, offset: [-c.x * s, -box.min.y * s, -c.z * s], size: [size.x * s, size.y * s, size.z * s] };
+    }
+    rec.parsed = { scene, animations };
+    return rec.parsed;
+  })();
+  rec.loading.catch(() => { rec.loading = null; });
+  return rec.loading;
+}
+
+// ---------- the live "model" object ----------
+function defaultClipIndex(anims) {
+  if (!anims.length) return -1;
+  const i = anims.findIndex(a => /idle|stand|rest|default/i.test(a.name || ''));
+  return i >= 0 ? i : 0;
+}
+
+function addModelObject(modelId, o = {}) {
+  const rec = modelStore.get(modelId);
+  if (!rec) return null;
+  const wrapper = new THREE.Group();
+  if (o.position) wrapper.position.copy(o.position);
+  if (o.quaternion) wrapper.quaternion.copy(o.quaternion);
+  else if (o.rotation) wrapper.rotation.copy(o.rotation);
+  if (o.scale) wrapper.scale.copy(o.scale);
+  scene.add(wrapper);
+  const id = o.id != null ? o.id : idCounter++;
+  const obj = {
+    id, mesh: wrapper, name: o.name || rec.name || 'Model', type: 'model',
+    collision: o.collision !== false, modelId,
+    content: null, mixer: null, action: null,
+    clipIndex: o.clipIndex, clipTime: o.clipTime || 0,
+    playing: o.playing !== false, speed: o.speed ?? 1, loop: o.loop !== false
+  };
+  if (o.animClips) obj.animClips = JSON.parse(JSON.stringify(o.animClips));
+  objects.push(obj);
+  const done = () => {
+    if (!objects.includes(obj)) return;
+    fillModelObject(obj, rec);
+  };
+  if (rec.parsed) done();
+  else parseModelRecord(rec).then(done).catch(err => {
+    console.error(err);
+    showToast(`Could not load model "${obj.name}" — check console`, true);
+  });
+  return obj;
+}
+
+function fillModelObject(obj, rec) {
+  const content = new THREE.Group();
+  content.name = '__modelContent';
+  content.add(SkeletonUtils.clone(rec.parsed.scene));
+  content.scale.setScalar(rec.fit.scale);
+  content.position.fromArray(rec.fit.offset);
+  obj.mesh.add(content);
+  obj.content = content;
+  obj.mixer = new THREE.AnimationMixer(content);
+  const anims = rec.parsed.animations;
+  if (obj.clipIndex === undefined) obj.clipIndex = defaultClipIndex(anims);
+  applyModelClip(obj);
+  if (obj.action && obj.clipTime) { obj.action.time = obj.clipTime; obj.mixer.update(0); }
+  applySelectionOutlines();
+  refreshOutliner();
+  refreshEmptyState();
+  if (selected === obj) refreshInspector();
+}
+
+function applyModelClip(o) {
+  if (!o.mixer) return;
+  const rec = modelStore.get(o.modelId);
+  const anims = (rec && rec.parsed && rec.parsed.animations) || [];
+  o.mixer.stopAllAction();
+  o.action = null;
+  const clip = anims[o.clipIndex];
+  if (!clip) return;
+  const a = o.mixer.clipAction(clip);
+  a.setLoop(o.loop === false ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
+  a.clampWhenFinished = true;
+  a.timeScale = o.speed ?? 1;
+  a.paused = o.playing === false;
+  a.play();
+  o.action = a;
+  o.mixer.update(0);
+}
+
+function snapshotModel(o, pos, rot, scale) {
+  return {
+    id: o.id, name: o.name, type: 'model', modelId: o.modelId,
+    collision: o.collision !== false,
+    pos, rot, scale,
+    clipIndex: o.clipIndex, clipTime: o.action ? o.action.time : (o.clipTime || 0),
+    playing: o.playing !== false, speed: o.speed ?? 1, loop: o.loop !== false,
+    animClips: o.animClips ? JSON.parse(JSON.stringify(o.animClips)) : null
+  };
+}
+
+function restoreModelFromSnapshot(s) {
+  if (!modelStore.has(s.modelId)) { console.warn('Model data missing for', s.name); return; }
+  const obj = addModelObject(s.modelId, {
+    id: s.id, name: s.name, collision: s.collision,
+    position: new THREE.Vector3().fromArray(s.pos),
+    rotation: new THREE.Euler(s.rot[0], s.rot[1], s.rot[2]),
+    scale: new THREE.Vector3().fromArray(s.scale),
+    clipIndex: s.clipIndex, clipTime: s.clipTime, playing: s.playing, speed: s.speed, loop: s.loop,
+    animClips: s.animClips
+  });
+  return obj;
+}
+
+function disposeModelObject(o) {
+  if (o.mixer) { o.mixer.stopAllAction(); o.mixer.uncacheRoot(o.content); }
+  // Geometry / materials / textures are shared with the cached parse (duplicates, undo and
+  // redo all clone from it), so they are intentionally NOT disposed here.
+}
+
+function duplicateModel(src) {
+  const wp = new THREE.Vector3(), wq = new THREE.Quaternion(), ws = new THREE.Vector3();
+  src.mesh.updateWorldMatrix(true, false);
+  src.mesh.matrixWorld.decompose(wp, wq, ws);
+  const n = objects.filter(o => o.modelId === src.modelId).length;
+  return addModelObject(src.modelId, {
+    name: src.name + ' copy', collision: src.collision,
+    position: wp.add(pasteOffset()), quaternion: wq, scale: ws,
+    clipIndex: src.clipIndex, clipTime: src.action ? src.action.time : 0,
+    playing: src.playing, speed: src.speed, loop: src.loop,
+    animClips: src.animClips
+  });
+}
+
+function modelStats(o) {
+  let meshes = 0, tris = 0, bones = 0;
+  const seen = new Set();
+  if (o.mesh) o.mesh.traverse(c => {
+    if (c.isMesh && c.geometry && c.geometry.attributes.position) {
+      meshes++;
+      tris += c.geometry.index ? c.geometry.index.count / 3 : c.geometry.attributes.position.count / 3;
+      if (c.isSkinnedMesh) c.skeleton.bones.forEach(b => seen.add(b.uuid));
+    }
+  });
+  bones = seen.size;
+  return { meshes, tris: Math.round(tris), bones };
+}
+
+// ---------- persistence (undo is in-memory; save/autosave embed the original file bytes) ----------
+function serializeModelsFor(snaps, maxChars) {
+  const ids = new Set(snaps.filter(s => s.type === 'model').map(s => s.modelId));
+  const models = {};
+  let total = 0;
+  for (const id of ids) {
+    const rec = modelStore.get(id);
+    if (!rec) continue;
+    const b64 = bufToB64(rec.bytes);
+    total += b64.length;
+    models[id] = { name: rec.name, kind: rec.kind, entry: rec.entry || null, fit: rec.fit || null, b64 };
+  }
+  if (maxChars && total > maxChars) return null;
+  return models;
+}
+function registerProjectModels(models) {
+  if (!models) return;
+  Object.entries(models).forEach(([id, m]) => {
+    if (modelStore.has(id) || !m || !m.b64) return;
+    modelStore.set(id, {
+      id, name: m.name || 'Model', kind: m.kind || 'glb', entry: m.entry || null,
+      fit: m.fit || null, bytes: b64ToBuf(m.b64), parsed: null, loading: null
+    });
+  });
+}
+
+// ---------- turning a model back into plain editable meshes ----------
+function breakModelIntoMeshes(o) {
+  if (!o.content) { showToast('Model is still loading', true); return; }
+  pushUndo();
+  const frozen = SkeletonUtils.clone(o.mesh); // clone keeps the pose the model is in right now
+  frozen.updateMatrixWorld(true);
+  const made = importAsEditableMeshes(frozen, o.name, null, { skipUndo: true });
+  if (!made.length) return;
+  deleteObject(o);
+  setSelection(made);
+  refreshOutliner(); refreshEmptyState();
+  showToast(`Split "${o.name}" into ${made.length} editable mesh${made.length !== 1 ? 'es' : ''}`);
+}
+
+// ---------- model inspector ----------
+const _escHtml = (s) => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+function renderModelInspector(o) {
+  const rec = modelStore.get(o.modelId);
+  const anims = (rec && rec.parsed && rec.parsed.animations) || [];
+  const loading = !o.content;
+  const p = o.mesh.position, r = o.mesh.rotation, s = o.mesh.scale;
+  const st = loading ? { meshes: 0, tris: 0, bones: 0 } : modelStats(o);
+  const clipOptions = ['<option value="-1">— Rest pose —</option>']
+    .concat(anims.map((c, i) => `<option value="${i}" ${i === o.clipIndex ? 'selected' : ''}>${_escHtml(c.name || 'Clip ' + (i + 1))} (${c.duration.toFixed(2)}s)</option>`)).join('');
+  const dur = o.action ? o.action.getClip().duration : 0;
+  const btnCss = 'width:100%; padding:8px; background:var(--bg-2); border:1px solid var(--border); border-radius:6px; color:var(--text-0); cursor:pointer;';
+  inspEl.innerHTML = `
+    <div class="insp-section">
+      <div class="insp-title-row">
+        <input class="insp-name-input" id="f-name" value="${_escHtml(o.name)}">
+        <div class="del-btn" id="f-delete" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></div>
+      </div>
+      <div class="insp-empty" style="text-align:left; padding:4px 0 12px;">${loading ? 'Loading model…' : `Imported model · ${st.meshes} mesh${st.meshes !== 1 ? 'es' : ''} · ${st.tris.toLocaleString()} tris${st.bones ? ` · ${st.bones} bones` : ''}`}</div>
+
+      <div class="field-label">Position</div>
+      <div class="xyz-row">
+        <div class="xyz-field x"><span class="axis">X</span><input type="number" step="0.1" id="pos-x" value="${p.x.toFixed(2)}"></div>
+        <div class="xyz-field y"><span class="axis">Y</span><input type="number" step="0.1" id="pos-y" value="${p.y.toFixed(2)}"></div>
+        <div class="xyz-field z"><span class="axis">Z</span><input type="number" step="0.1" id="pos-z" value="${p.z.toFixed(2)}"></div>
+      </div>
+
+      <div class="field-label">Rotation (°)</div>
+      <div class="xyz-row">
+        <div class="xyz-field x"><span class="axis">X</span><input type="number" step="1" id="rot-x" value="${THREE.MathUtils.radToDeg(r.x).toFixed(0)}"></div>
+        <div class="xyz-field y"><span class="axis">Y</span><input type="number" step="1" id="rot-y" value="${THREE.MathUtils.radToDeg(r.y).toFixed(0)}"></div>
+        <div class="xyz-field z"><span class="axis">Z</span><input type="number" step="1" id="rot-z" value="${THREE.MathUtils.radToDeg(r.z).toFixed(0)}"></div>
+      </div>
+
+      <div class="field-label">Scale</div>
+      <div class="xyz-row">
+        <div class="xyz-field x"><span class="axis">X</span><input type="number" step="0.1" id="scl-x" value="${s.x.toFixed(2)}"></div>
+        <div class="xyz-field y"><span class="axis">Y</span><input type="number" step="0.1" id="scl-y" value="${s.y.toFixed(2)}"></div>
+        <div class="xyz-field z"><span class="axis">Z</span><input type="number" step="0.1" id="scl-z" value="${s.z.toFixed(2)}"></div>
+      </div>
+    </div>
+
+    <div class="insp-section">
+      <div class="field-label" style="margin-top:0">Model animation${anims.length ? ` (${anims.length} clip${anims.length !== 1 ? 's' : ''})` : ''}</div>
+      ${anims.length ? `
+        <select id="f-model-clip" style="${btnCss} cursor:default; margin-bottom:8px;">${clipOptions}</select>
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+          <button id="f-model-play" style="${btnCss} flex:1;">${o.playing === false ? '▶ Play' : '❚❚ Pause'}</button>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-1,#bbb); white-space:nowrap;"><input type="checkbox" id="f-model-loop" ${o.loop !== false ? 'checked' : ''}> Loop</label>
+        </div>
+        <div class="field-label">Clip time</div>
+        <div class="slider-row">
+          <input type="range" min="0" max="1000" step="1" id="f-model-time" value="${dur ? Math.round((o.action.time % dur) / dur * 1000) : 0}" ${o.action ? '' : 'disabled'}>
+          <span class="slider-val" id="f-model-time-label" style="min-width:68px;">${o.action ? o.action.time.toFixed(2) + 's' : '—'}</span>
+        </div>
+        <div class="field-label">Speed</div>
+        <div class="slider-row">
+          <input type="range" min="0.1" max="3" step="0.05" id="f-model-speed" value="${o.speed ?? 1}">
+          <span class="slider-val" id="f-model-speed-val">${(o.speed ?? 1).toFixed(2)}×</span>
+        </div>` : `<div class="insp-empty" style="text-align:left; padding:0;">${loading ? '' : 'This file has no animation clips.'}</div>`}
+    </div>
+
+    <div class="insp-section">
+      <label style="display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:10px;"><input type="checkbox" id="f-model-solid" ${o.collision !== false ? 'checked' : ''}> Solid (collision)</label>
+      <button id="f-model-break" style="${btnCss}" title="Replace this model with separate editable meshes in its current pose (colour, texture and edit-mode tools work on them; rig and PBR maps are lost)">Break into editable meshes</button>
+    </div>`;
+
+  document.getElementById('f-name').addEventListener('change', (e) => { pushUndo(); o.name = e.target.value || o.name; refreshOutliner(); });
+  document.getElementById('f-delete').addEventListener('click', () => { pushUndo(); deleteObject(o); selected = null; selectedSet.clear(); transformControls.detach(); refreshOutliner(); refreshInspector(); refreshEmptyState(); });
+  ['x', 'y', 'z'].forEach(ax => {
+    document.getElementById(`pos-${ax}`).addEventListener('change', (e) => { pushUndo(); o.mesh.position[ax] = parseFloat(e.target.value) || 0; });
+    document.getElementById(`rot-${ax}`).addEventListener('change', (e) => { pushUndo(); o.mesh.rotation[ax] = THREE.MathUtils.degToRad(parseFloat(e.target.value) || 0); });
+    document.getElementById(`scl-${ax}`).addEventListener('change', (e) => { pushUndo(); o.mesh.scale[ax] = parseFloat(e.target.value) || 0.01; });
+  });
+  document.getElementById('f-model-solid').addEventListener('change', (e) => { pushUndo(); o.collision = e.target.checked; refreshOutliner(); });
+  document.getElementById('f-model-break').addEventListener('click', () => breakModelIntoMeshes(o));
+
+  const clipSel = document.getElementById('f-model-clip');
+  if (clipSel) {
+    clipSel.addEventListener('change', (e) => {
+      pushUndo();
+      o.clipIndex = parseInt(e.target.value, 10);
+      if (o.clipIndex >= 0 && o.playing === false && !o.action) o.playing = true;
+      applyModelClip(o);
+      refreshInspector();
+    });
+    document.getElementById('f-model-play').addEventListener('click', (e) => {
+      o.playing = o.playing === false;
+      if (o.action) o.action.paused = o.playing === false;
+      e.target.textContent = o.playing === false ? '▶ Play' : '❚❚ Pause';
+    });
+    document.getElementById('f-model-loop').addEventListener('change', (e) => {
+      pushUndo();
+      o.loop = e.target.checked;
+      const t = o.action ? o.action.time : 0;
+      applyModelClip(o);
+      if (o.action) { o.action.time = t; o.mixer.update(0); }
+    });
+    const timeEl = document.getElementById('f-model-time');
+    timeEl.addEventListener('input', () => {
+      if (!o.action) return;
+      o.playing = false;
+      o.action.paused = true;
+      o.action.time = (parseFloat(timeEl.value) / 1000) * o.action.getClip().duration;
+      o.mixer.update(0);
+      document.getElementById('f-model-play').textContent = '▶ Play';
+    });
+    const speedEl = document.getElementById('f-model-speed');
+    speedEl.addEventListener('input', () => {
+      o.speed = parseFloat(speedEl.value);
+      if (o.action) o.action.timeScale = o.speed;
+      document.getElementById('f-model-speed-val').textContent = o.speed.toFixed(2) + '×';
+    });
+  }
+}
+
+// Keeps the clip-time slider moving while a model clip plays (cheap: only the selected model).
+// three.js caches a skinned mesh's bounding box / sphere the FIRST time they're asked for (in
+// whatever pose it happened to be in), so once an animal walks out of that box it can no longer be
+// clicked and its selection outline is wrong. Recompute from the current pose whenever it matters.
+(function patchSkinnedMeshRaycast() {
+  const proto = THREE.SkinnedMesh.prototype;
+  if (proto.__livePickPatched) return;
+  const orig = proto.raycast;
+  proto.raycast = function (raycaster, intersects) {
+    this.computeBoundingBox();
+    this.computeBoundingSphere();
+    return orig.call(this, raycaster, intersects);
+  };
+  proto.__livePickPatched = true;
+})();
+let _modelBoundsAt = 0;
+function refreshSelectedModelBounds(now) {
+  if (now - _modelBoundsAt < 100) return;
+  _modelBoundsAt = now;
+  for (const o of objects) {
+    if (o.type !== 'model' || !o.content || !selectedSet.has(o.id)) continue;
+    o.mesh.traverse(c => {
+      if (c.isSkinnedMesh && c.geometry.attributes.position.count <= 150000) { c.computeBoundingBox(); c.computeBoundingSphere(); }
+    });
+  }
+}
+
+function syncModelInspectorTime() {
+  const o = selected;
+  if (!o || o.type !== 'model' || !o.action) return;
+  const timeEl = document.getElementById('f-model-time');
+  if (!timeEl || document.activeElement === timeEl) return;
+  const dur = o.action.getClip().duration || 1;
+  const t = o.action.time;
+  timeEl.value = Math.round(((t % dur) + dur) % dur / dur * 1000);
+  const lab = document.getElementById('f-model-time-label');
+  if (lab) lab.textContent = t.toFixed(2) + 's';
+}
+
+// ---------- import entry points ----------
+async function importFiles(fileList) {
+  const files = [...fileList].filter(f => f && f.name);
+  if (!files.length) return;
+
+  // A dropped saved-project is still a project.
+  if (files.length === 1 && /\.json$/i.test(files[0].name)) { loadProjectFromFile(files[0]); return; }
+
+  const zips = files.filter(f => /\.zip$/i.test(f.name));
+  const models = files.filter(f => MODEL_EXT_RE.test(f.name));
+  if (!zips.length && !models.length) { showToast('Unsupported file — use .glb, .gltf, .obj or a .zip containing one', true); return; }
+
+  showToast('Importing…');
+  const records = [];
+  try {
+    for (const z of zips) {
+      records.push(newModelRecordFrom({ name: z.name.replace(/\.zip$/i, ''), kind: 'zip', bytes: await z.arrayBuffer() }));
+    }
+    if (models.length === 1 && files.length === 1 && /\.glb$/i.test(models[0].name)) {
+      records.push(newModelRecordFrom({ name: models[0].name.replace(/\.glb$/i, ''), kind: 'glb', bytes: await models[0].arrayBuffer() }));
+    } else if (models.length) {
+      // Loose files (e.g. scene.gltf + scene.bin + textures, or model.obj + model.mtl): bundle the
+      // sidecar files with each model so relative references resolve, and so it saves as one blob.
+      const loose = files.filter(f => !/\.zip$/i.test(f.name));
+      for (const m of models) {
+        const bundle = new JSZip();
+        const group = models.length === 1 ? loose : [m, ...loose.filter(f => !MODEL_EXT_RE.test(f.name))];
+        for (const f of group) bundle.file(f.webkitRelativePath || f.name, await f.arrayBuffer());
+        const bytes = await bundle.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
+        records.push(newModelRecordFrom({ name: m.name.replace(MODEL_EXT_RE, ''), kind: 'zip', bytes, entry: m.webkitRelativePath || m.name }));
+      }
+    }
+
+    const made = [];
+    for (const rec of records) {
+      await parseModelRecord(rec);
+      made.push(rec);
+    }
+    pushUndo();
+    // Drop each new model into free space to the right of whatever is already in the scene,
+    // instead of stacking everything on top of the origin.
+    const gap = 0.75;
+    let cursor = null;
+    const sceneBox = new THREE.Box3();
+    objects.forEach(o => { const b = new THREE.Box3().setFromObject(o.mesh); if (!b.isEmpty()) sceneBox.union(b); });
+    if (!sceneBox.isEmpty()) cursor = sceneBox.max.x + gap;
+    const objs = made.map((rec) => {
+      const w = (rec.fit && rec.fit.size) ? rec.fit.size[0] : 2;
+      let x = 0;
+      if (cursor === null) cursor = w / 2 + gap;
+      else { x = cursor + w / 2; cursor = x + w / 2 + gap; }
+      return addModelObject(rec.id, { name: rec.name, position: new THREE.Vector3(x, 0, 0) });
+    }).filter(Boolean);
+    setSelection(objs);
+    refreshOutliner(); refreshEmptyState();
+    const clipCount = made.reduce((n, r) => n + r.parsed.animations.length, 0);
+    showToast(`Imported ${objs.map(o => o.name).join(', ')}` + (clipCount ? ` — ${clipCount} animation clip${clipCount !== 1 ? 's' : ''}` : ''));
+  } catch (err) {
+    console.error(err);
+    records.forEach(r => { if (!r.parsed) modelStore.delete(r.id); });
+    showToast('Import failed — ' + (err && err.message ? err.message : 'check console'), true);
+  }
+}
+
+function newModelRecordFrom(init) {
+  const rec = { id: newModelId(), name: 'Model', kind: 'glb', bytes: null, entry: null, fit: null, parsed: null, loading: null, ...init };
+  modelStore.set(rec.id, rec);
+  return rec;
+}
+
+document.getElementById('btn-import').addEventListener('click', () => document.getElementById('file-import').click());
+document.getElementById('file-import').addEventListener('change', (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  importFiles(files);
+});
+
+// Drag & drop anywhere on the page (files only, so dragging UI elements is unaffected).
+(function setupModelDrop() {
+  const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  let depth = 0;
+  window.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); depth++; wrap.classList.add('drop-hot'); });
+  window.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  window.addEventListener('dragleave', (e) => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) wrap.classList.remove('drop-hot'); });
+  window.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0; wrap.classList.remove('drop-hot');
+    importFiles(e.dataTransfer.files);
+  });
+})();
+
+// ---------------- EDITABLE-MESH IMPORT (used by "Break into editable meshes") ----------------
 // glTF animations drive NODES (possibly parents of the meshes), but the editor stores
 // keyframes per object in world space. For every clip we find the meshes whose own node
 // or any ancestor is animated, sample the file's animation with an AnimationMixer at each
@@ -3914,6 +4600,8 @@ function bakeImportedAnimations(root, clips, meshNodes, objs) {
       jobs.forEach(j => {
         if (!j.times.includes(t)) return;
         j.node.matrixWorld.decompose(pos, quat, scl);
+        // The editor object's origin sits at its geometry's centre, not at the glTF node's origin.
+        if (j.obj.__importCenter) pos.copy(j.obj.__importCenter).applyMatrix4(j.node.matrixWorld);
         const tr = j.obj.animClips[id];
         tr.pos.push({ t, x: pos.x, y: pos.y, z: pos.z, ease: 'linear' });
         tr.rot.push({ t, x: quat.x, y: quat.y, z: quat.z, w: quat.w, ease: 'linear' });
@@ -3940,122 +4628,101 @@ function bakeImportedAnimations(root, clips, meshNodes, objs) {
       updateAnimTimeLabel();
       updateScrubBar();
     }
-  } else if (defaultUnused) {
-    // nothing was added; registry untouched
   }
   return added;
 }
 
-document.getElementById('btn-import').addEventListener('click', () => document.getElementById('file-import').click());
-document.getElementById('file-import').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const ext = file.name.split('.').pop().toLowerCase();
-  const url = URL.createObjectURL(file);
-
-  const finishImport = (rootObject3D, baseName, importedClips) => {
-    pushUndo();
-    const meshesFound = [];
-    rootObject3D.traverse((child) => {
-      if (child.isMesh) meshesFound.push(child);
-    });
-    if (meshesFound.length === 0) {
-      showToast('No mesh geometry found in file', true);
-      return;
-    }
-    // Track how many times each resolved name has been used so far in this
-    // import batch, so duplicate mesh names (common with Blender exports that
-    // reuse names like "Cube" across objects) get de-duplicated with a
-    // numeric suffix instead of silently colliding in the outliner.
-    const nameCounts = new Map();
-    const newObjs = meshesFound.map((child, i) => {
-      child.geometry.computeVertexNormals();
-      child.geometry.center();
-      const worldPos = new THREE.Vector3();
-      child.getWorldPosition(worldPos);
-      const worldScale = new THREE.Vector3();
-      child.getWorldScale(worldScale);
-      const worldQuat = new THREE.Quaternion();
-      child.getWorldQuaternion(worldQuat);
-      const worldRot = new THREE.Euler().setFromQuaternion(worldQuat);
-
-      let mat = child.material;
-      if (Array.isArray(mat)) mat = mat[0];
-      const color = (mat && mat.color) ? '#'+mat.color.getHexString() : colorPresets[objects.length % colorPresets.length];
-      const map = (mat && mat.map) ? mat.map : null;
-
-      // Was this mesh invisible in the source file? Three checks, since a
-      // file can hide a part any of these ways:
-      //  1. Object3D.visible === false on the mesh itself or any ancestor
-      //     up to the import root (glTF's KHR_node_visibility-style hiding).
-      //  2. Material.visible === false (a material-level hide, independent
-      //     of the node transform hierarchy).
-      //  3. A transparent material sitting at (or near) zero opacity —
-      //     the common "invisible collision mesh" pattern from DCC tools.
-      // Previously none of this was read, so every imported mesh came in
-      // fully opaque and visible regardless of how it looked in the file.
-      let chainVisible = true;
-      for (let n = child; n && n !== rootObject3D.parent; n = n.parent) {
-        if (n.visible === false) { chainVisible = false; break; }
+// Splits a loaded scene graph into one editable object per mesh. Each mesh's geometry is baked
+// at its REST pose (skinned meshes included) and re-centred on its own bounding box while the
+// object is positioned so it still sits exactly where it did in the source scene.
+function importAsEditableMeshes(rootObject3D, baseName, importedClips, opts = {}) {
+  if (!opts.skipUndo) pushUndo();
+  rootObject3D.updateMatrixWorld(true);
+  const meshesFound = [];
+  rootObject3D.traverse((child) => {
+    if (child.isMesh && child.geometry && child.geometry.attributes.position) meshesFound.push(child);
+  });
+  if (meshesFound.length === 0) {
+    showToast('No mesh geometry found in file', true);
+    return [];
+  }
+  const nameCounts = new Map();
+  const newObjs = meshesFound.map((child, i) => {
+    const geometry = child.geometry.clone();
+    if (child.isSkinnedMesh) {
+      child.skeleton.update();
+      const pos = geometry.attributes.position;
+      const v = new THREE.Vector3();
+      for (let k = 0; k < pos.count; k++) {
+        v.fromBufferAttribute(pos, k);
+        child.applyBoneTransform(k, v);
+        pos.setXYZ(k, v.x, v.y, v.z);
       }
-      const matVisible = mat ? mat.visible !== false : true;
-      const srcOpacity = (mat && typeof mat.opacity === 'number') ? mat.opacity : 1;
-      const srcTransparent = !!(mat && mat.transparent);
-      const sourceHidden = !chainVisible || !matVisible || (srcTransparent && srcOpacity <= 0.01);
-      const importOpacity = sourceHidden ? 0 : (srcTransparent ? srcOpacity : 1);
+      pos.needsUpdate = true;
+      geometry.deleteAttribute('skinIndex');
+      geometry.deleteAttribute('skinWeight');
+    }
+    geometry.computeVertexNormals();
+    geometry.computeBoundingBox();
+    const localCenter = geometry.boundingBox.getCenter(new THREE.Vector3());
+    geometry.translate(-localCenter.x, -localCenter.y, -localCenter.z);
 
-      // Prefer the mesh's own name from the file (glTF node/mesh name, OBJ
-      // object/group name). Fall back to the filename if the mesh has no
-      // name, or if it collides with the file's base name generically
-      // (e.g. Three.js's OBJLoader sometimes names the root mesh "" or
-      // reuses the group name).
-      const rawMeshName = (child.name && child.name.trim()) ? child.name.trim() : null;
-      const fallbackName = meshesFound.length > 1 ? `${baseName}_${i+1}` : baseName;
-      let resolvedName = rawMeshName || fallbackName;
+    const worldPos = new THREE.Vector3(), worldQuat = new THREE.Quaternion(), worldScale = new THREE.Vector3();
+    child.matrixWorld.decompose(worldPos, worldQuat, worldScale);
+    const centerWorld = localCenter.clone().applyMatrix4(child.matrixWorld);
+    const worldRot = new THREE.Euler().setFromQuaternion(worldQuat);
 
-      const seen = nameCounts.get(resolvedName) || 0;
-      nameCounts.set(resolvedName, seen + 1);
-      if (seen > 0) resolvedName = `${resolvedName}_${seen+1}`;
+    let mat = child.material;
+    if (Array.isArray(mat)) mat = mat[0];
+    const color = (mat && mat.color) ? '#' + mat.color.getHexString() : colorPresets[(objects.length + i) % colorPresets.length];
+    const map = (mat && mat.map) ? mat.map : null;
 
-      // If this file was previously exported from this editor, GLTFExporter
-      // will have stamped node.extras.collision from userData.collision.
-      // Three's GLTFLoader surfaces glTF extras back on child.userData, so
-      // read it here — otherwise re-importing a no-collision object would
-      // silently reset it back to solid.
-      const importedCollision = (child.userData && child.userData.collision !== undefined)
-        ? child.userData.collision !== false
-        : true;
+    // Was this mesh invisible in the source file? (node hidden, material hidden, or a
+    // transparent material at ~zero opacity — the usual "invisible collision mesh" pattern.)
+    let chainVisible = true;
+    for (let n = child; n && n !== rootObject3D.parent; n = n.parent) {
+      if (n.visible === false) { chainVisible = false; break; }
+    }
+    const matVisible = mat ? mat.visible !== false : true;
+    const srcOpacity = (mat && typeof mat.opacity === 'number') ? mat.opacity : 1;
+    const srcTransparent = !!(mat && mat.transparent);
+    const sourceHidden = !chainVisible || !matVisible || (srcTransparent && srcOpacity <= 0.01);
+    const importOpacity = sourceHidden ? 0 : (srcTransparent ? srcOpacity : 1);
 
-      const obj = addPrimitiveFromGeometry(child.geometry, {
-        name: resolvedName,
-        position: worldPos,
-        rotation: worldRot,
-        scale: worldScale.length() > 0 ? worldScale : new THREE.Vector3(1,1,1),
-        color, map,
-        roughness: mat?.roughness ?? 0.55,
-        metalness: mat?.metalness ?? 0.08,
-        opacity: importOpacity,
-        collision: importedCollision
-      }, true);
-      return obj;
-    });
-    // Bake any animation clips from the file into the editor's keyframe tracks.
-    const bakedClipCount = bakeImportedAnimations(rootObject3D, importedClips, meshesFound, newObjs);
+    const rawMeshName = (child.name && child.name.trim()) ? child.name.trim() : null;
+    const fallbackName = meshesFound.length > 1 ? `${baseName}_${i + 1}` : baseName;
+    let resolvedName = rawMeshName || fallbackName;
+    const seen = nameCounts.get(resolvedName) || 0;
+    nameCounts.set(resolvedName, seen + 1);
+    if (seen > 0) resolvedName = `${resolvedName}_${seen + 1}`;
+
+    // glTF extras (re-imports of our own exports) carry the collision flag.
+    const importedCollision = (child.userData && child.userData.collision !== undefined)
+      ? child.userData.collision !== false : true;
+
+    const obj = addPrimitiveFromGeometry(geometry, {
+      name: resolvedName,
+      position: centerWorld,
+      rotation: worldRot,
+      scale: worldScale.length() > 0 ? worldScale : new THREE.Vector3(1, 1, 1),
+      color, map,
+      roughness: mat?.roughness ?? 0.55,
+      metalness: mat?.metalness ?? 0.08,
+      opacity: importOpacity,
+      collision: importedCollision
+    }, true);
+    obj.__importCenter = localCenter.clone();
+    return obj;
+  });
+  const bakedClipCount = importedClips ? bakeImportedAnimations(rootObject3D, importedClips, meshesFound, newObjs) : 0;
+  newObjs.forEach(o => { delete o.__importCenter; });
+  if (!opts.skipSelect) {
     setSelection(newObjs);
     refreshOutliner(); refreshEmptyState();
-    if (bakedClipCount && !anim.active) setAppMode('animation'); // so the keyframes are visible right away
-    showToast(`Imported ${newObjs.length} object${newObjs.length!==1?'s':''} from ${file.name}` + (bakedClipCount ? ` with ${bakedClipCount} animation${bakedClipCount!==1?'s':''}` : ''));
-  };
-
-  if (ext === 'glb' || ext === 'gltf') {
-    gltfLoader.load(url, (gltf) => finishImport(gltf.scene, file.name.replace(/\.(glb|gltf)$/i,''), gltf.animations), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
-  } else if (ext === 'obj') {
-    new OBJLoader().load(url, (objRoot) => finishImport(objRoot, file.name.replace(/\.obj$/i,'')), undefined, (err) => { console.error(err); showToast('Import failed — check console', true); });
-  } else {
-    showToast('Unsupported file type', true);
+    if (bakedClipCount && !anim.active) setAppMode('animation');
   }
-  e.target.value = '';
-});
+  return newObjs;
+}
 
 function addPrimitiveFromGeometry(geometry, opts, skipSelect=false) {
   const opacity = opts.opacity ?? 1;
@@ -4934,7 +5601,9 @@ function doExport(format, modelName, clipNameOverrides) {
 
   const exportScene = new THREE.Scene();
   objects.forEach(o => {
-    const clone = o.mesh.clone();
+    // SkeletonUtils.clone re-binds skinned meshes to the cloned bones (a plain clone() would leave
+    // them driven by the ORIGINAL skeleton, exporting a broken rig).
+    const clone = o.type === 'model' ? SkeletonUtils.clone(o.mesh) : o.mesh.clone();
     // GLTFExporter understands a material array directly (it maps geometry groups
     // to glTF primitives, one per material) — clone each face material independently
     // so the exported file keeps distinct per-face textures.
@@ -4953,6 +5622,25 @@ function doExport(format, modelName, clipNameOverrides) {
   });
 
   const clips = buildAnimationClips(exportScene, objects, clipNameOverrides);
+  // Skeletal / node animation clips that came with imported models. Tracks are re-targeted by
+  // node UUID so two models that share bone names don't fight over the same bones.
+  const modelObjs = objects.map((o, i) => ({ o, i })).filter(x => x.o.type === 'model' && x.o.content);
+  modelObjs.forEach(({ o, i }) => {
+    const mrec = modelStore.get(o.modelId);
+    const root = exportScene.children[i];
+    ((mrec && mrec.parsed && mrec.parsed.animations) || []).forEach((src) => {
+      const tracks = [];
+      src.tracks.forEach(tr => {
+        const parsed = THREE.PropertyBinding.parseTrackName(tr.name);
+        const node = THREE.PropertyBinding.findNode(root, parsed.nodeName);
+        if (!node || parsed.objectName) return; // skip unresolved / morph-target tracks
+        const t2 = tr.clone();
+        t2.name = `${node.uuid}.${parsed.propertyName}${parsed.propertyIndex != null ? '[' + parsed.propertyIndex + ']' : ''}`;
+        tracks.push(t2);
+      });
+      if (tracks.length) clips.push(new THREE.AnimationClip(modelObjs.length > 1 ? `${o.name} - ${src.name}` : src.name, src.duration, tracks));
+    });
+  });
 
   if (wasAnimating) applyAnimAtTime(anim.time); // restore the viewport's scrub position
 
@@ -4984,6 +5672,7 @@ function downloadBlob(blob, filename) {
 
 // ---------------- SAVE / LOAD PROJECT ----------------
 function saveProject() {
+  const snaps = snapshotScene();
   const project = {
     app: 'formwork-3d-modeler',
     version: 2,
@@ -4991,7 +5680,8 @@ function saveProject() {
     modelName: currentModelName,
     animClips: JSON.parse(JSON.stringify(anim.clips)),
     animImages: collectAnimImages(),
-    objects: snapshotScene()
+    objects: snaps,
+    models: serializeModelsFor(snaps)
   };
   const json = JSON.stringify(project, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
@@ -5048,6 +5738,7 @@ function loadProjectFromFile(file) {
       return;
     }
     pushUndo();
+    if (!Array.isArray(project)) registerProjectModels(project.models);
     restoreScene(snap);
     applyLoadedClips(Array.isArray(project) ? null : project);
     showToast(`Loaded project (${snap.length} object${snap.length!==1?'s':''})`);
@@ -5068,6 +5759,11 @@ document.getElementById('file-load-project').addEventListener('change', (e) => {
 const AUTOSAVE_KEY = 'formwork3d-autosave';
 function autosaveToLocalStorage() {
   try {
+    let snaps = snapshotScene();
+    // Models are stored as their original file bytes (base64). localStorage is small, so if the
+    // models would blow the quota, autosave the plain objects only rather than failing outright.
+    let models = serializeModelsFor(snaps, 3500000);
+    if (models === null) { snaps = snaps.filter(sn => sn.type !== 'model'); models = {}; }
     const project = {
       app: 'formwork-3d-modeler',
       version: 2,
@@ -5075,7 +5771,8 @@ function autosaveToLocalStorage() {
       modelName: currentModelName,
       animClips: JSON.parse(JSON.stringify(anim.clips)),
       animImages: collectAnimImages(),
-      objects: snapshotScene()
+      objects: snaps,
+      models
     };
     localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(project));
   } catch (err) {
@@ -5094,6 +5791,7 @@ window.addEventListener('load', () => {
       if (project?.objects?.length) {
         const when = project.savedAt ? new Date(project.savedAt).toLocaleString() : 'earlier';
         if (confirm(`Restore your autosaved project from ${when}?`)) {
+          registerProjectModels(project.models);
           restoreScene(project.objects);
           applyLoadedClips(project);
           showToast('Autosave restored');
@@ -5201,6 +5899,10 @@ function buildEditTopology(geometry) {
 
 function enterEditMode() {
   if (!selected || selectedSet.size !== 1) { showToast('Select a single object to edit', true); return; }
+  if (!selected.mesh.geometry) {
+    showToast(selected.type === 'model' ? 'Use "Break into editable meshes" in the inspector to edit this model' : 'Groups have no geometry to edit', true);
+    return;
+  }
   pushUndo();
   editMode.active = true;
   editMode.obj = selected;
@@ -6160,7 +6862,7 @@ document.getElementById('anim-clip-delete').addEventListener('click', deleteActi
 
 function keyTracks(tr, t, p, q, s, o) {
   const ease = anim.defaultEase;
-  if (o) { backfillMatKeys(o); upsertKey(matKeysOf(tr), { t, ...captureMat(o), ease }); }
+  if (o && o.mesh && o.mesh.material) { backfillMatKeys(o); upsertKey(matKeysOf(tr), { t, ...captureMat(o), ease }); }
   upsertKey(tr.pos, { t, x: p.x, y: p.y, z: p.z, ease });
   upsertKey(tr.rot, { t, x: q.x, y: q.y, z: q.z, w: q.w, ease });
   upsertKey(tr.scale, { t, x: s.x, y: s.y, z: s.z, ease });
@@ -7608,8 +8310,13 @@ function onResize() {
 }
 window.addEventListener('resize', onResize);
 
+const _modelClock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
+  const _mdt = Math.min(_modelClock.getDelta(), 0.1);
+  for (const o of objects) if (o.mixer) o.mixer.update(_mdt);
+  syncModelInspectorTime();
+  refreshSelectedModelBounds(performance.now());
   orbit.update();
   updateResizeHandles();
   if (document.body.classList.contains('cinema')) cinemaHideHelpers();
@@ -7749,7 +8456,7 @@ function objTransformToCollabData(o) {
 // ---------------- OUTGOING: push local changes ----------------
 function collabPushObjectFull(o) {
   if (!collab.active || collab.applyingRemote) return;
-  if (o.type === 'group') return; // groups aren't synced as mesh objects
+  if (o.type === 'group' || o.type === 'model') return; // groups / imported models aren't synced as mesh objects
   const remoteId = o.remoteId;
   if (!remoteId) return;
   set(ref(db, `sessions/${collab.sessionId}/objects/${remoteId}`), {
@@ -7904,7 +8611,7 @@ async function startCollabSession(existingSessionId) {
     // existing objects (e.g. the default starter box) as the initial state.
     await set(sessionRef, { createdAt: serverTimestamp() });
     objects.forEach(o => {
-      if (o.type === 'group') return;
+      if (o.type === 'group' || o.type === 'model') return;
       o.remoteId = o.remoteId || `r${o.id}_${collab.userId}`;
       remoteIdToLocalId.set(o.remoteId, o.id);
       collabPushObjectFull(o);
