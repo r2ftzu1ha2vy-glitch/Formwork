@@ -1261,6 +1261,22 @@
 
     <div class="setting-row">
       <div class="setting-label">
+        <span class="st-name">Move snap increment</span>
+        <span class="st-desc">When "Snap to grid" (bottom bar) is enabled, moving an object jumps in steps of this size (world units).</span>
+      </div>
+      <input type="number" id="move-snap-input" class="scale-snap-input" value="0.5" min="0.01" max="50" step="0.01">
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="st-name">Rotate snap increment (°)</span>
+        <span class="st-desc">When "Snap to grid" (bottom bar) is enabled, rotating an object jumps in steps of this many degrees.</span>
+      </div>
+      <input type="number" id="rotate-snap-input" class="scale-snap-input" value="15" min="1" max="180" step="1">
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
         <span class="st-name">Scale snap increment</span>
         <span class="st-desc">When "Snap to grid" (bottom bar) is enabled, scaling an object jumps in steps of this size instead of moving smoothly. Lower values (e.g. 0.1) give finer control; higher values (e.g. 0.5) snap in bigger jumps.</span>
       </div>
@@ -1589,7 +1605,12 @@ function updateResizeHandles() {
   transformControls.showX = transformControls.showY = transformControls.showZ = !on;
   resizeHandleGroup.visible = on;
   if (!on) { rg.hover = null; return; }
-  const bb = t.geometry.boundingBox || (t.geometry.computeBoundingBox(), t.geometry.boundingBox);
+  const posAttr = t.geometry.attributes && t.geometry.attributes.position;
+  if (!t.geometry.boundingBox || (posAttr && t.geometry.userData.__bbV !== posAttr.version)) {
+    t.geometry.computeBoundingBox();
+    if (posAttr) t.geometry.userData.__bbV = posAttr.version;
+  }
+  const bb = t.geometry.boundingBox;
   const c = bb.getCenter(new THREE.Vector3());
   const white = new THREE.Color('#ffffff');
   resizeHandles.forEach(h => {
@@ -1647,8 +1668,18 @@ window.addEventListener('pointerdown', (e) => {
   renderer.domElement.style.cursor = 'grabbing';
 }, true);
 
+function endResizeDrag() {
+  if (!rg.dragging) return;
+  rg.dragging = false; rg.h = null; rg.justDragged = true;
+  setTimeout(() => { rg.justDragged = false; }, 60);
+  transformControls.dispatchEvent({ type: 'dragging-changed', value: false }); // re-enables orbit
+  renderer.domElement.style.cursor = '';
+}
 window.addEventListener('pointermove', (e) => {
   if (rg.dragging) {
+    // Button already released but we never saw the pointerup (file dialog, alt-tab, released
+    // outside the window): let go instead of staying latched onto the mouse.
+    if (e.buttons === 0) { endResizeDrag(); return; }
     e.stopPropagation();
     const ray = rgRay(e), t = rg.t, axis = rg.axis;
     const dist = rg.sign * axisParam(ray, rg.pinWorld, rg.dir) - rg.grab;
@@ -1676,11 +1707,11 @@ window.addEventListener('pointermove', (e) => {
 window.addEventListener('pointerup', (e) => {
   if (!rg.dragging) return;
   e.stopPropagation();
-  rg.dragging = false; rg.h = null; rg.justDragged = true;
-  setTimeout(() => { rg.justDragged = false; }, 60);
-  transformControls.dispatchEvent({ type: 'dragging-changed', value: false });
-  renderer.domElement.style.cursor = '';
+  endResizeDrag();
 }, true);
+window.addEventListener('pointercancel', endResizeDrag, true);
+window.addEventListener('blur', endResizeDrag);
+document.addEventListener('visibilitychange', () => { if (document.hidden) endResizeDrag(); });
 window.addEventListener('click', (e) => { if (rg.justDragged) { e.stopPropagation(); e.preventDefault(); } }, true);
 
 // ---- Settings UI wiring ----
@@ -1715,6 +1746,8 @@ let selectedSet = new Set(); // ids of all selected objects (multi-select)
 let idCounter = 1;
 let snapEnabled = false;
 let scaleSnapAmount = 0.25;
+let moveSnapAmount = 0.5;
+let rotateSnapDeg = 15;
 let resizeMode = 'one-sided'; // 'symmetric' | 'one-sided'
 let resizeNeighborSnapEnabled = true; // whether scaling near another object snaps flush against it
 let nextImageTile = false; // inspector toggle: tile the NEXT uploaded image (and shows current state)
@@ -3428,41 +3461,57 @@ function refreshInspector() {
   // Uploading a whole-object image applies it to every face material uniformly
   // (overwriting any per-face text textures) — this is the "skin the whole object"
   // path, distinct from the per-face "Text on Face" tool below.
-  document.getElementById('f-tex-upload').addEventListener('click', () => document.getElementById('f-tex-input').click());
+  document.getElementById('f-tex-upload').addEventListener('click', () => {
+    endResizeDrag();                       // never open the picker with a handle drag latched
+    const inp = document.getElementById('f-tex-input');
+    inp.value = '';                        // lets you pick the SAME file again and still get a change event
+    inp.click();
+  });
   document.getElementById('f-tex-input').addEventListener('change', (e) => {
     const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
-    // Use a data URL (not a blob: URL) so the texture is embedded as real
-    // bytes. blob: URLs are only valid for the lifetime of the page/tab —
-    // saving one into a project JSON and reloading it later (or in a new
-    // session) leaves a dead reference and the texture silently fails to load.
     const fr = new FileReader();
+    fr.onerror = () => showToast('Could not read that image', true);
     fr.onload = () => {
-      const dataUrl = fr.result;
-      new THREE.TextureLoader().load(dataUrl, (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.userData.tile = nextImageTile;
-        const hasAlpha = prepareAlphaTexture(tex); // must run before clone() so every face inherits the result
-        pushUndo();
-        animMatBeforeEdit([o]);
-        const box = new THREE.Box3().setFromObject(o.mesh);
-        const size = box.getSize(new THREE.Vector3());
-        matList.forEach((m, i) => {
-          if (m.map) m.map.dispose();
-          const t = i === 0 ? tex : tex.clone();
-          applyTextureModeToTexture(t, { w: size.x || 1, h: size.y || 1 });
-          m.map = t;
-          m.transparent = true;
-          // A transparent image should show its own colors, not be tinted by the
-          // object's base color (a dark base color multiplies the image toward black).
-          if (hasAlpha) m.color.set('#ffffff');
-          applyAlphaCutout(m, t);
-        });
-        syncCutoutShadow(o.mesh);
-        o.faceLabels = null;
-        animMatAfterEdit([o]);
-        refreshInspector();
-      });
+      new THREE.TextureLoader().load(fr.result, (tex) => {
+        try {
+          // Re-resolve the live object: undo/redo rebuilds meshes, so the `o` captured when the
+          // inspector was drawn can be a dead mesh that is no longer in the scene.
+          const live = objects.find(x => x.id === o.id);
+          if (!live) return;
+          const mats = Array.isArray(live.mesh.material) ? live.mesh.material : [live.mesh.material];
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.userData.tile = nextImageTile;
+          const hasAlpha = prepareAlphaTexture(tex); // must run before clone() so every face inherits the result
+          pushUndo();
+          animMatBeforeEdit([live]);
+          const size = new THREE.Box3().setFromObject(live.mesh).getSize(new THREE.Vector3());
+          mats.forEach((m, i) => {
+            const old = m.map;
+            const t = i === 0 ? tex : tex.clone();
+            t.needsUpdate = true;
+            applyTextureModeToTexture(t, { w: size.x || 1, h: size.y || 1 });
+            m.map = t;
+            m.transparent = true;
+            if (hasAlpha) m.color.set('#ffffff');
+            applyAlphaCutout(m, t);
+            m.needsUpdate = true;
+            if (old && old !== t) old.dispose();   // dispose AFTER the swap, never before
+          });
+          syncCutoutShadow(live.mesh);
+          live.faceLabels = null;
+          animMatAfterEdit([live]);
+        } catch (err) {
+          console.error('Image replace failed', err);
+          showToast('Image replace failed: ' + err.message, true);
+        } finally {
+          // Always leave gizmo, outline and inspector agreeing with the selection.
+          if (selectedSet.size === 1 && selected && transformControls.object !== selected.mesh) attachGizmoToSelection();
+          applySelectionOutlines();
+          refreshInspector();
+        }
+      }, undefined, () => showToast('That image could not be loaded', true));
     };
     fr.readAsDataURL(file);
   });
@@ -3552,10 +3601,31 @@ const snapSwitch = document.getElementById('snap-switch');
 document.getElementById('snap-toggle').addEventListener('click', () => {
   snapEnabled = !snapEnabled;
   snapSwitch.classList.toggle('on', snapEnabled);
-  transformControls.setTranslationSnap(snapEnabled ? 0.5 : null);
-  transformControls.setRotationSnap(snapEnabled ? THREE.MathUtils.degToRad(15) : null);
-  transformControls.setScaleSnap(snapEnabled ? scaleSnapAmount : null);
+  applySnapSettings();
 });
+function applySnapSettings() {
+  transformControls.setTranslationSnap(snapEnabled ? moveSnapAmount : null);
+  transformControls.setRotationSnap(snapEnabled ? THREE.MathUtils.degToRad(rotateSnapDeg) : null);
+  transformControls.setScaleSnap(snapEnabled ? scaleSnapAmount : null);
+}
+
+// Move + rotate snap increments (Settings)
+function bindSnapInput(id, min, max, fallback, assign) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const apply = () => {
+    let v = parseFloat(el.value);
+    if (!isFinite(v) || v <= 0) v = fallback;
+    v = Math.min(max, Math.max(min, v));
+    assign(v);
+    applySnapSettings();
+    return v;
+  };
+  el.addEventListener('input', apply);
+  el.addEventListener('change', () => { el.value = apply(); });
+}
+bindSnapInput('move-snap-input', 0.01, 50, 0.5, v => { moveSnapAmount = v; });
+bindSnapInput('rotate-snap-input', 1, 180, 15, v => { rotateSnapDeg = v; });
 
 // Scale snap increment input (in Settings)
 const scaleSnapInput = document.getElementById('scale-snap-input');
@@ -3564,7 +3634,7 @@ function applyScaleSnapAmount() {
   if (!isFinite(v) || v <= 0) v = 0.25;
   v = Math.min(5, Math.max(0.01, v));
   scaleSnapAmount = v;
-  if (snapEnabled) transformControls.setScaleSnap(scaleSnapAmount);
+  applySnapSettings();
 }
 if (scaleSnapInput) {
   scaleSnapInput.addEventListener('input', applyScaleSnapAmount);
@@ -3576,10 +3646,8 @@ if (scaleSnapInput) {
 // Make sure the currently configured increment is actually in effect
 // right before a scale drag begins, in case setScaleSnap got stale.
 transformControls.addEventListener('mouseDown', () => {
-  const currentMode = typeof transformControls.getMode === 'function' ? transformControls.getMode() : transformControls.mode;
-  if (snapEnabled && currentMode === 'scale') {
-    transformControls.setScaleSnap(scaleSnapAmount);
-  }
+  // Re-assert every increment right before any drag (move, rotate or scale).
+  applySnapSettings();
 });
 
 // Snap the camera to look at the model from the front (looking down -Z, toward +Z marker)
