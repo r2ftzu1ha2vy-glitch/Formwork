@@ -2463,7 +2463,7 @@ function copySelected() {
       return { isGroup: true, name: obj.name, members: members.map(m => cloneMeshDataFor(m)) };
     }
     if (obj.type === 'model') {
-      return { isModel: true, modelId: obj.modelId, name: obj.name, collision: obj.collision,
+      return { isModel: true, modelId: obj.modelId, part: obj.part, name: obj.name, collision: obj.collision,
         pos: obj.mesh.position.clone(), quat: obj.mesh.quaternion.clone(), scale: obj.mesh.scale.clone(),
         clipIndex: obj.clipIndex, playing: obj.playing, speed: obj.speed, loop: obj.loop };
     }
@@ -2503,7 +2503,7 @@ function pasteClipboard() {
       nextClipboard.push({ ...entry, members: entry.members.map((data, i) => ({ ...data, pos: copies[i].mesh.position.clone() })) });
     } else if (entry.isModel) {
       const newObj = addModelObject(entry.modelId, {
-        name: entry.name + ' copy', collision: entry.collision,
+        name: entry.name + ' copy', collision: entry.collision, part: entry.part,
         position: entry.pos.clone().add(offset), quaternion: entry.quat.clone(), scale: entry.scale.clone(),
         clipIndex: entry.clipIndex, playing: entry.playing, speed: entry.speed, loop: entry.loop
       });
@@ -3078,8 +3078,7 @@ function refreshOutliner() {
     }
 
     if (obj.type === 'model') {
-      const mrec = modelStore.get(obj.modelId);
-      const nClips = (mrec && mrec.parsed) ? mrec.parsed.animations.length : 0;
+      const nClips = modelClipsFor(obj).filter(c => c.tracks.length).length;
       row.innerHTML = `
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${iconFor('imported')}</svg>
         <span class="name">${_escHtml(obj.name)}${obj.content ? '' : ' <span style="opacity:0.5">(loading…)</span>'}</span>
@@ -4106,11 +4105,114 @@ function parseModelRecord(rec) {
         ? { scale: 1, offset: [0, 0, 0], size: [2, 2, 2] }
         : { scale: s, offset: [-c.x * s, -box.min.y * s, -c.z * s], size: [size.x * s, size.y * s, size.z * s] };
     }
-    rec.parsed = { scene, animations };
+    let parts = null;
+    const chars = findModelCharacterNodes(scene);
+    if (chars) {
+      scene.updateMatrixWorld(true);
+      const sc = rec.fit.scale;
+      parts = chars.map((n, i) => {
+        const b = computeModelBounds(n);
+        const ok = !b.isEmpty();
+        const c = ok ? b.getCenter(new THREE.Vector3()) : new THREE.Vector3();
+        const sz = ok ? b.getSize(new THREE.Vector3()) : new THREE.Vector3(1, 1, 1);
+        const minY = ok ? b.min.y : 0;
+        return {
+          name: n.name || ('Part ' + (i + 1)),
+          animations: buildPartClips(n, animations),
+          fit: {
+            scale: sc,
+            offset: [-c.x * sc, -minY * sc, -c.z * sc],
+            center: [c.x * sc, minY * sc, c.z * sc],
+            size: [sz.x * sc, sz.y * sc, sz.z * sc]
+          }
+        };
+      });
+    }
+    rec.parsed = { scene, animations, parts };
     return rec.parsed;
   })();
   rec.loading.catch(() => { rec.loading = null; });
   return rec.loading;
+}
+
+// ---------- multi-character files (e.g. a "3 animals" pack) ----------
+// A file can hold several self-contained rigged characters side by side that share one clip set.
+// We detect them so each can be split into its own model object WITH its own animations.
+function _isSelfContainedRig(n) {
+  const inside = new Set();
+  n.traverse(c => inside.add(c));
+  let skinned = 0, ok = true;
+  n.traverse(c => {
+    if (!c.isSkinnedMesh) return;
+    skinned++;
+    if (!c.skeleton.bones.every(b => inside.has(b))) ok = false;
+  });
+  return skinned > 0 && ok;
+}
+function findModelCharacterNodes(scene) {
+  let root = scene;
+  for (let depth = 0; depth < 4; depth++) {
+    const rigs = root.children.filter(_isSelfContainedRig);
+    if (rigs.length >= 2) return rigs;
+    if (rigs.length === 1) root = rigs[0]; else return null;
+  }
+  return null;
+}
+// The file's clips, reduced to the tracks that drive ONE character. Every clip is kept (even if it
+// ends up empty) so clip indices stay identical between the whole model and each part.
+function buildPartClips(partNode, animations) {
+  const names = new Set();
+  partNode.traverse(c => { if (c.name) names.add(c.name); names.add(c.uuid); });
+  return animations.map(clip => {
+    const tracks = clip.tracks.filter(tr => {
+      try { return names.has(THREE.PropertyBinding.parseTrackName(tr.name).nodeName); } catch (e) { return false; }
+    }).map(tr => tr.clone());
+    return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+  });
+}
+function pruneSceneToPart(sceneClone, partIndex) {
+  const nodes = findModelCharacterNodes(sceneClone);
+  if (!nodes || !nodes[partIndex]) return;
+  nodes.forEach((n, i) => { if (i !== partIndex && n.parent) n.parent.remove(n); });
+}
+// The clips that belong to a live model object (its own character's, or the whole file's).
+function modelClipsFor(o) {
+  const rec = modelStore.get(o.modelId);
+  const p = rec && rec.parsed;
+  if (!p) return [];
+  if (o.part != null && p.parts && p.parts[o.part]) return p.parts[o.part].animations;
+  return p.animations || [];
+}
+function modelPartsOf(o) {
+  const rec = modelStore.get(o.modelId);
+  return (rec && rec.parsed && rec.parsed.parts) || null;
+}
+
+// Replace one multi-character model with one model object per character, each keeping its clips,
+// current clip / speed / loop settings and (roughly) where it stood.
+function splitModelIntoCharacters(o) {
+  const parts = modelPartsOf(o);
+  const rec = modelStore.get(o.modelId);
+  if (!parts || !rec || !o.content || o.part != null) { showToast('Nothing to split', true); return; }
+  pushUndo();
+  o.mesh.updateMatrix();
+  const made = parts.map((part, i) => {
+    const local = new THREE.Vector3(
+      part.fit.center[0] + rec.fit.offset[0],
+      part.fit.center[1] + rec.fit.offset[1],
+      part.fit.center[2] + rec.fit.offset[2]
+    ).applyMatrix4(o.mesh.matrix);
+    return addModelObject(o.modelId, {
+      name: part.name, part: i, collision: o.collision,
+      position: local, quaternion: o.mesh.quaternion.clone(), scale: o.mesh.scale.clone(),
+      clipIndex: o.clipIndex, clipTime: o.action ? o.action.time : 0,
+      playing: o.playing, speed: o.speed, loop: o.loop
+    });
+  }).filter(Boolean);
+  deleteObject(o);
+  setSelection(made);
+  refreshOutliner(); refreshEmptyState();
+  showToast(`Split into ${made.length} individual models: ${made.map(m => m.name).join(', ')}`);
 }
 
 // ---------- the live "model" object ----------
@@ -4132,7 +4234,7 @@ function addModelObject(modelId, o = {}) {
   const id = o.id != null ? o.id : idCounter++;
   const obj = {
     id, mesh: wrapper, name: o.name || rec.name || 'Model', type: 'model',
-    collision: o.collision !== false, modelId,
+    collision: o.collision !== false, modelId, part: o.part != null ? o.part : null,
     content: null, mixer: null, action: null,
     clipIndex: o.clipIndex, clipTime: o.clipTime || 0,
     playing: o.playing !== false, speed: o.speed ?? 1, loop: o.loop !== false
@@ -4154,13 +4256,17 @@ function addModelObject(modelId, o = {}) {
 function fillModelObject(obj, rec) {
   const content = new THREE.Group();
   content.name = '__modelContent';
-  content.add(SkeletonUtils.clone(rec.parsed.scene));
-  content.scale.setScalar(rec.fit.scale);
-  content.position.fromArray(rec.fit.offset);
+  const sceneClone = SkeletonUtils.clone(rec.parsed.scene);
+  const partDef = (obj.part != null && rec.parsed.parts) ? rec.parsed.parts[obj.part] : null;
+  if (partDef) pruneSceneToPart(sceneClone, obj.part);
+  const fit = partDef ? partDef.fit : rec.fit;
+  content.add(sceneClone);
+  content.scale.setScalar(fit.scale);
+  content.position.fromArray(fit.offset);
   obj.mesh.add(content);
   obj.content = content;
   obj.mixer = new THREE.AnimationMixer(content);
-  const anims = rec.parsed.animations;
+  const anims = modelClipsFor(obj);
   if (obj.clipIndex === undefined) obj.clipIndex = defaultClipIndex(anims);
   applyModelClip(obj);
   if (obj.action && obj.clipTime) { obj.action.time = obj.clipTime; obj.mixer.update(0); }
@@ -4172,8 +4278,7 @@ function fillModelObject(obj, rec) {
 
 function applyModelClip(o) {
   if (!o.mixer) return;
-  const rec = modelStore.get(o.modelId);
-  const anims = (rec && rec.parsed && rec.parsed.animations) || [];
+  const anims = modelClipsFor(o);
   o.mixer.stopAllAction();
   o.action = null;
   const clip = anims[o.clipIndex];
@@ -4190,7 +4295,7 @@ function applyModelClip(o) {
 
 function snapshotModel(o, pos, rot, scale) {
   return {
-    id: o.id, name: o.name, type: 'model', modelId: o.modelId,
+    id: o.id, name: o.name, type: 'model', modelId: o.modelId, part: o.part != null ? o.part : null,
     collision: o.collision !== false,
     pos, rot, scale,
     clipIndex: o.clipIndex, clipTime: o.action ? o.action.time : (o.clipTime || 0),
@@ -4202,7 +4307,7 @@ function snapshotModel(o, pos, rot, scale) {
 function restoreModelFromSnapshot(s) {
   if (!modelStore.has(s.modelId)) { console.warn('Model data missing for', s.name); return; }
   const obj = addModelObject(s.modelId, {
-    id: s.id, name: s.name, collision: s.collision,
+    id: s.id, name: s.name, collision: s.collision, part: s.part,
     position: new THREE.Vector3().fromArray(s.pos),
     rotation: new THREE.Euler(s.rot[0], s.rot[1], s.rot[2]),
     scale: new THREE.Vector3().fromArray(s.scale),
@@ -4224,7 +4329,7 @@ function duplicateModel(src) {
   src.mesh.matrixWorld.decompose(wp, wq, ws);
   const n = objects.filter(o => o.modelId === src.modelId).length;
   return addModelObject(src.modelId, {
-    name: src.name + ' copy', collision: src.collision,
+    name: src.name + ' copy', collision: src.collision, part: src.part,
     position: wp.add(pasteOffset()), quaternion: wq, scale: ws,
     clipIndex: src.clipIndex, clipTime: src.action ? src.action.time : 0,
     playing: src.playing, speed: src.speed, loop: src.loop,
@@ -4291,7 +4396,8 @@ const _escHtml = (s) => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<'
 
 function renderModelInspector(o) {
   const rec = modelStore.get(o.modelId);
-  const anims = (rec && rec.parsed && rec.parsed.animations) || [];
+  const anims = modelClipsFor(o);
+  const parts = modelPartsOf(o);
   const loading = !o.content;
   const p = o.mesh.position, r = o.mesh.rotation, s = o.mesh.scale;
   const st = loading ? { meshes: 0, tris: 0, bones: 0 } : modelStats(o);
@@ -4351,6 +4457,7 @@ function renderModelInspector(o) {
 
     <div class="insp-section">
       <label style="display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:10px;"><input type="checkbox" id="f-model-solid" ${o.collision !== false ? 'checked' : ''}> Solid (collision)</label>
+      ${parts && o.part == null && !loading ? `<button id="f-model-split" style="${btnCss} margin-bottom:8px;" title="This file contains ${parts.length} separate rigged characters. Split them into individual models; each keeps its own animations.">Split into ${parts.length} individual models (${_escHtml(parts.map(p => p.name).join(', '))})</button>` : ''}
       <button id="f-model-break" style="${btnCss}" title="Replace this model with separate editable meshes in its current pose (colour, texture and edit-mode tools work on them; rig and PBR maps are lost)">Break into editable meshes</button>
     </div>`;
 
@@ -4363,6 +4470,8 @@ function renderModelInspector(o) {
   });
   document.getElementById('f-model-solid').addEventListener('change', (e) => { pushUndo(); o.collision = e.target.checked; refreshOutliner(); });
   document.getElementById('f-model-break').addEventListener('click', () => breakModelIntoMeshes(o));
+  const splitBtn = document.getElementById('f-model-split');
+  if (splitBtn) splitBtn.addEventListener('click', () => splitModelIntoCharacters(o));
 
   const clipSel = document.getElementById('f-model-clip');
   if (clipSel) {
@@ -4498,7 +4607,9 @@ async function importFiles(fileList) {
     setSelection(objs);
     refreshOutliner(); refreshEmptyState();
     const clipCount = made.reduce((n, r) => n + r.parsed.animations.length, 0);
-    showToast(`Imported ${objs.map(o => o.name).join(', ')}` + (clipCount ? ` — ${clipCount} animation clip${clipCount !== 1 ? 's' : ''}` : ''));
+    const multi = made.find(r => r.parsed.parts);
+    showToast(`Imported ${objs.map(o => o.name).join(', ')}` + (clipCount ? ` — ${clipCount} animation clip${clipCount !== 1 ? 's' : ''}` : '')
+      + (multi ? ` · ${multi.parsed.parts.length} characters inside: select it and press "Split into individual models"` : ''));
   } catch (err) {
     console.error(err);
     records.forEach(r => { if (!r.parsed) modelStore.delete(r.id); });
@@ -5628,7 +5739,7 @@ function doExport(format, modelName, clipNameOverrides) {
   modelObjs.forEach(({ o, i }) => {
     const mrec = modelStore.get(o.modelId);
     const root = exportScene.children[i];
-    ((mrec && mrec.parsed && mrec.parsed.animations) || []).forEach((src) => {
+    modelClipsFor(o).forEach((src) => {
       const tracks = [];
       src.tracks.forEach(tr => {
         const parsed = THREE.PropertyBinding.parseTrackName(tr.name);
