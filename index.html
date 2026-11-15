@@ -1240,17 +1240,6 @@
 
     <div class="setting-row">
       <div class="setting-label">
-        <span class="st-name">Snap-to-neighbor while resizing</span>
-        <span class="st-desc">When on and "Snap to grid" (bottom bar) is enabled, resizing an object near another one will pull the growing edge flush against it. This is what causes an object to shift position mid-resize. Turn off if that movement is unwanted.</span>
-      </div>
-      <div class="seg-control" id="resize-neighbor-snap-control">
-        <div class="seg-opt active" data-value="on">On</div>
-        <div class="seg-opt" data-value="off">Off</div>
-      </div>
-    </div>
-
-    <div class="setting-row">
-      <div class="setting-label">
         <span class="st-name">Theme</span>
         <span class="st-desc">Switch between dark and light interface colors.</span>
       </div>
@@ -2978,44 +2967,8 @@ transformControls.addEventListener('objectChange', () => {
     });
   }
 
-  if (snapEnabled && target && (typeof editPivot === 'undefined' || target !== editPivot)) {
-    if (transformControls.mode === 'translate') {
-      let movingIds;
-      if (target === multiProxy) {
-        movingIds = new Set(proxyChildOffsets.map(p => p.obj.id));
-      } else {
-        const found = objects.find(o => o.mesh === target);
-        movingIds = new Set(found ? [found.id] : []);
-      }
-      if (movingIds.size > 0) {
-        const movingObjs = objects.filter(o => movingIds.has(o.id));
-        const movingBox = new THREE.Box3();
-        movingObjs.forEach((o, i) => {
-          const b = new THREE.Box3().setFromObject(o.mesh);
-          if (i === 0) movingBox.copy(b); else movingBox.union(b);
-        });
-        const others = objects.filter(o => !movingIds.has(o.id)).map(o => new THREE.Box3().setFromObject(o.mesh));
-        // Only snap the axes the gizmo is actually dragging, so dragging along X can't
-        // nudge the part sideways on Y/Z and fight the grid.
-        const gAxis = String(transformControls.axis || '').toUpperCase();
-        ['x','y','z'].forEach(axis => {
-          if (gAxis && !gAxis.includes(axis.toUpperCase())) return;
-          const d = computeEdgeSnapDelta(movingBox, others, axis);
-          if (d !== null) {
-            target.position[axis] += d;
-            if (target === multiProxy) movingObjs.forEach(o => o.mesh.position[axis] += d);
-          }
-        });
-      }
-    } else if (transformControls.mode === 'scale' && target !== multiProxy && resizeMode !== 'one-sided' && resizeNeighborSnapEnabled && !rg.dragging) {
-      // Edge-to-neighbor snapping during resize only makes sense in Symmetric mode. In
-      // One-Sided mode, applyOneSidedResize below already pins the opposite face itself —
-      // running both would fight over mesh.position on the same tick and read as random
-      // jitter/drift while dragging a scale handle.
-      const found = objects.find(o => o.mesh === target);
-      if (found) applyResizeEdgeSnap(found);
-    }
-  }
+  // Snap-to-grid only uses the move / rotate / scale increments (set via setTranslationSnap etc.).
+  // Snapping to neighbouring objects' edges has been removed on purpose.
 
   if (transformControls.mode === 'scale' && target && target !== multiProxy && (typeof editPivot === 'undefined' || target !== editPivot)) {
     applyOneSidedResize(target);
