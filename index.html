@@ -3326,7 +3326,14 @@ function refreshInspector() {
         <label style="display:flex; align-items:center; gap:6px; font-size:11.5px; cursor:pointer; flex:1;" title="On: the image keeps its size and repeats as you resize the object. Off: it stretches to fill.">
           <input type="checkbox" id="f-tile-toggle" ${(matList.some(m=>m.map&&m.map.userData&&m.map.userData.tile) || (!matList.some(m=>m.map) && nextImageTile)) ? 'checked' : ''}> Tile image (repeat, don't stretch)
         </label>
-        <input type="number" id="f-tile-size" class="scale-snap-input" title="Width of one tile (units)" min="0.05" step="0.05" value="${(()=>{const t=matList.map(m=>m.map).find(t=>t&&t.userData&&t.userData.tileSize); return t?t.userData.tileSize.w.toFixed(2):'1.00';})()}" style="display:${matList.some(m=>m.map&&m.map.userData&&m.map.userData.tile)?'':'none'}">
+      </div>
+      <div id="f-tile-size-row" style="display:${matList.some(m=>m.map&&m.map.userData&&m.map.userData.tile)?'block':'none'}; margin-top:6px;">
+        <div class="field-label" style="margin-top:0;">Units per tile</div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <div class="xyz-field x" title="Units per tile, U (width)"><span class="axis">U</span><input type="number" id="f-tile-u" min="0.01" step="0.05" value="${(()=>{const t=matList.map(m=>m.map).find(t=>t&&t.userData&&t.userData.tileSize); return t?t.userData.tileSize.w.toFixed(2):'1.00';})()}"></div>
+          <div class="xyz-field y" title="Units per tile, V (height)"><span class="axis">V</span><input type="number" id="f-tile-v" min="0.01" step="0.05" value="${(()=>{const t=matList.map(m=>m.map).find(t=>t&&t.userData&&t.userData.tileSize); return t?t.userData.tileSize.h.toFixed(2):'1.00';})()}"></div>
+          <button class="btn" id="f-tile-reset" title="Reset to the image's native aspect ratio" style="padding:6px 8px;">Reset</button>
+        </div>
       </div>
       <input type="file" id="f-tex-input" accept="image/*" style="display:none">
 
@@ -3585,19 +3592,31 @@ function refreshInspector() {
     };
     fr.readAsDataURL(file);
   });
-  const tileToggle = document.getElementById('f-tile-toggle'), tileSizeEl = document.getElementById('f-tile-size');
+  const tileToggle = document.getElementById('f-tile-toggle');
+  const tileUEl = document.getElementById('f-tile-u'), tileVEl = document.getElementById('f-tile-v');
   tileToggle.addEventListener('change', () => {
     nextImageTile = tileToggle.checked;
-    if (!matList.some(m => m.map)) return; // no image yet: just sets the default for the next upload
+    if (!matList.some(m => m.map)) { refreshInspector(); return; } // no image yet: just sets the default for the next upload
     pushUndo();
     matList.forEach(m => { if (m.map && !m.map.isTextTexture) { m.map.userData.tile = nextImageTile; m.map.userData.tileSize = undefined; } });
     refreshTiles(o); refreshInspector();
   });
-  tileSizeEl.addEventListener('change', () => {
-    const w = parseFloat(tileSizeEl.value); if (!(w > 0)) return;
+  function applyTileUV() {
+    const u = parseFloat(tileUEl.value), v = parseFloat(tileVEl.value);
+    if (!(u > 0) || !(v > 0)) return;
     pushUndo();
-    matList.forEach(m => { const t = m.map; if (t && t.userData.tile && t.image) t.userData.tileSize = { w, h: w / (t.image.width / t.image.height) }; });
+    matList.forEach(m => {
+      const t = m.map;
+      if (t && t.userData.tile && !t.isTextTexture) t.userData.tileSize = { w: u, h: v };
+    });
     refreshTiles(o);
+  }
+  tileUEl.addEventListener('change', applyTileUV);
+  tileVEl.addEventListener('change', applyTileUV);
+  document.getElementById('f-tile-reset').addEventListener('click', () => {
+    pushUndo();
+    matList.forEach(m => { if (m.map && m.map.userData.tile && !m.map.isTextTexture) m.map.userData.tileSize = undefined; });
+    refreshTiles(o); refreshInspector();
   });
   const clearBtn = document.getElementById('f-tex-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => {
@@ -4840,8 +4859,6 @@ function renderModelInspector(o) {
         </div>` : `<div class="insp-empty" style="text-align:left; padding:0;">${loading ? '' : 'This file has no animation clips.'}</div>`}
     </div>
 
-    ${rigEditorHTML(o, anims, loading)}
-
     <div class="insp-section">
       <label style="display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:10px;"><input type="checkbox" id="f-model-solid" ${o.collision !== false ? 'checked' : ''}> Solid (collision)</label>
       ${parts && o.part == null && !loading ? `<button id="f-model-split" style="${btnCss} margin-bottom:8px;" title="This file contains ${parts.length} separate rigged characters. Split them into individual models; each keeps its own animations.">Split into ${parts.length} individual models (${_escHtml(parts.map(p => p.name).join(', '))})</button>` : ''}
@@ -4859,7 +4876,6 @@ function renderModelInspector(o) {
   document.getElementById('f-model-break').addEventListener('click', () => breakModelIntoMeshes(o));
   const splitBtn = document.getElementById('f-model-split');
   if (splitBtn) splitBtn.addEventListener('click', () => splitModelIntoCharacters(o));
-  wireRigEditor(o);
 
   const clipSel = document.getElementById('f-model-clip');
   if (clipSel) {
@@ -4931,7 +4947,6 @@ function refreshSelectedModelBounds(now) {
 function syncModelInspectorTime() {
   const o = selected;
   if (!o || o.type !== 'model' || !o.action) return;
-  if (o.playing !== false && o._rigOpen) syncRigFields(o);
   const timeEl = document.getElementById('f-model-time');
   if (!timeEl || document.activeElement === timeEl) return;
   const dur = o.action.getClip().duration || 1;
@@ -5328,7 +5343,7 @@ function applyTextureModeToTexture(tex, faceSize) {
   if (ud.tile && ok) {
     // Tile size is fixed in world units the first time (one image fitted to the face at its
     // native aspect). After that, resizing the object only changes how MANY tiles fit.
-    if (!ud.tileSize || !(ud.tileSize.w > 0)) {
+    if (!ud.tileSize || !(ud.tileSize.w > 0) || !(ud.tileSize.h > 0)) {
       const aspect = tex.image.width / tex.image.height;
       let w = faceSize.w, h = w / aspect;
       if (h > faceSize.h) { h = faceSize.h; w = h * aspect; }
