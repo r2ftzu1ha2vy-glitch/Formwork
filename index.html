@@ -1550,7 +1550,14 @@ try {
   const s = JSON.parse(localStorage.getItem(GIZMO_KEY) || 'null');
   if (s) { gizmoTheme = { ...gizmoTheme, ...(s.theme || {}) }; gizmoPreset = s.preset || 'custom'; gizmoSize = s.size || 1; pasteInPlace = !!s.pasteInPlace; }
 } catch (err) { /* ignore */ }
-function pasteOffset() { return pasteInPlace ? new THREE.Vector3(0, 0, 0) : new THREE.Vector3(0.6, 0, 0.6); }
+// Copies land exactly on top of the original when "in place" is on. With snap-to-grid on they are
+// nudged by exactly one move-snap increment (never the old fixed 0.6), so a copy always stays on the
+// same grid lines as its original and later moves land on clean multiples of the increment.
+function pasteOffset() {
+  if (pasteInPlace) return new THREE.Vector3(0, 0, 0);
+  if (snapEnabled && moveSnapAmount > 0) return new THREE.Vector3(moveSnapAmount, 0, moveSnapAmount);
+  return new THREE.Vector3(0.6, 0, 0.6);
+}
 
 // Face handles: one per side (+X/-X/+Y/-Y/+Z/-Z) in the object's own axes. Grab a side and
 // THAT side moves while the opposite one stays put. Hold Alt to grow from the center.
@@ -3636,7 +3643,23 @@ function goToFrontView() {
 
 // Keyboard shortcuts
 window.addEventListener('keydown', (e) => {
-  if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+  const ae = document.activeElement;
+  if (ae && ['INPUT','TEXTAREA'].includes(ae.tagName)) {
+    // Ctrl/Cmd shortcuts typed while a sidebar field is focused should act on the scene, not on the
+    // browser (Ctrl+F = find bar, Ctrl+D = bookmark, Ctrl+S = save page, Ctrl+O = open file...).
+    // Blur first so the typed value is committed (change event), then fall through to the normal handler.
+    const mod = e.ctrlKey || e.metaKey;
+    const k = (e.key || '').toLowerCase();
+    const isModalField = ae.tagName === 'TEXTAREA' || /^(tf-|export-|collab-)/.test(ae.id || '');
+    const isNumberish = ae.tagName === 'INPUT' && ['number', 'range', 'color', 'checkbox'].includes(ae.type);
+    const hijack = mod && !isModalField && (
+      ['f', 'd', 'g', 's', 'o'].includes(k) ||           // always conflict with the browser
+      (isNumberish && ['c', 'v'].includes(k))             // number boxes have no text worth copying
+    );
+    if (!hijack) return;
+    e.preventDefault();
+    ae.blur();
+  }
 
   if (e.key === 'Tab') { e.preventDefault(); toggleEditMode(); return; }
 
