@@ -3641,6 +3641,13 @@ function goToFrontView() {
   showToast(frontIndicatorVisible ? 'Front view' : 'Front view (indicator hidden)');
 }
 
+// Remember which transform field (pos/rot/scl + x/y/z) was edited last, so typing a number later can resume there.
+let lastTransformField = null;
+document.addEventListener('focusin', (e) => {
+  const id = e.target && e.target.id;
+  if (id && /^(pos|rot|scl)-[xyz]$/.test(id)) lastTransformField = id;
+});
+
 // Keyboard shortcuts
 window.addEventListener('keydown', (e) => {
   const ae = document.activeElement;
@@ -3659,6 +3666,23 @@ window.addEventListener('keydown', (e) => {
     if (!hijack) return;
     e.preventDefault();
     ae.blur();
+  } else if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9.\-]$/.test(e.key) && !editMode.active && lastTransformField) {
+    // Nothing is focused and a number was typed: jump straight back into the transform field you were
+    // last editing (pos/rot/scl x/y/z), replacing its value with what you type. No need to click it again.
+    const modalOpen = document.getElementById('text-face-modal')
+      || document.getElementById('settings-overlay').style.display === 'flex'
+      || document.getElementById('export-overlay').classList.contains('show')
+      || document.getElementById('collabModalOverlay').style.display === 'flex'
+      || document.getElementById('meshModalOverlay').classList.contains('open');
+    const field = document.getElementById(lastTransformField);
+    if (field && !modalOpen && selected && !cinema.active) {
+      e.preventDefault();
+      field.focus();
+      field.select();
+      field.value = e.key;
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
   }
 
   if (e.key === 'Tab') { e.preventDefault(); toggleEditMode(); return; }
