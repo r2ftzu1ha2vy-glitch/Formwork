@@ -2307,16 +2307,18 @@ function cloneMeshDataFor(obj) {
       emissiveIntensity: fm.emissiveIntensity ?? 0, map: fm.map || null
     })) : null,
     faceLabels: obj.faceLabels ? { ...obj.faceLabels } : null,
+    uvOrig: uvOrig.get(obj.mesh.geometry),
     geoGroups: isMulti ? obj.mesh.geometry.groups.map(g => ({ ...g })) : null
   };
 }
 
 function createObjectFromClone(data, posOverride) {
   const geo = data.geometry ? data.geometry.clone() : new THREE.BufferGeometry();
+  if (data.geometry && data.uvOrig !== undefined) uvOrig.set(geo, data.uvOrig);
   if (!geo.attributes.position || geo.attributes.position.count === 0) {
     console.warn('Duplicated geometry had no position data — falling back to a unit box so the copy stays visible');
     geo.dispose();
-    return createObjectFromClone({ ...data, geometry: new THREE.BoxGeometry(1,1,1) }, posOverride);
+    return createObjectFromClone({ ...data, geometry: new THREE.BoxGeometry(1,1,1), uvOrig: undefined }, posOverride);
   }
   const dupOpac = data.opacity ?? 1;
   const side = (data.type === 'plane' || data.type === 'text' || data.type === 'ring' || data.doubleSided) ? THREE.DoubleSide : THREE.FrontSide;
@@ -3584,6 +3586,7 @@ function refreshInspector() {
           showToast('Image replace failed: ' + err.message, true);
         } finally {
           // Always leave gizmo, outline and inspector agreeing with the selection.
+          { const _lv = objects.find(x => x.id === o.id); if (_lv) refreshTiles(_lv); }
           if (selectedSet.size === 1 && selected && transformControls.object !== selected.mesh) attachGizmoToSelection();
           applySelectionOutlines();
           refreshInspector();
@@ -5334,25 +5337,15 @@ function faceAspectRatio(obj, face) {
 // face without ever being stretched (by the shorter of "fit by width" or "fit by height"), then
 // repeated as many times as needed to cover the rest of the face. In Normal mode it stretches to
 // fill (repeat reset to 1,1), matching the old default behavior.
+// Tile mode now works in WORLD UNITS by rewriting the mesh's UVs (see refreshTiles), so the
+// texture itself just needs RepeatWrapping and a 1x1 repeat. Stretch mode keeps the original UVs.
+// (faceSize is kept as an ignored parameter so older call sites still work.)
 function applyTextureModeToTexture(tex, faceSize) {
   if (!tex) return;
   const ud = tex.userData || (tex.userData = {});
-  const ok = faceSize && faceSize.w > 1e-6 && faceSize.h > 1e-6 && tex.image && tex.image.width && tex.image.height;
-  const wrap = (ud.tile && ok) ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
-  if (tex.wrapS !== wrap) { tex.wrapS = tex.wrapT = wrap; tex.needsUpdate = true; }
-  if (ud.tile && ok) {
-    // Tile size is fixed in world units the first time (one image fitted to the face at its
-    // native aspect). After that, resizing the object only changes how MANY tiles fit.
-    if (!ud.tileSize || !(ud.tileSize.w > 0) || !(ud.tileSize.h > 0)) {
-      const aspect = tex.image.width / tex.image.height;
-      let w = faceSize.w, h = w / aspect;
-      if (h > faceSize.h) { h = faceSize.h; w = h * aspect; }
-      ud.tileSize = { w, h };
-    }
-    tex.repeat.set(faceSize.w / ud.tileSize.w, faceSize.h / ud.tileSize.h);
-  } else {
-    tex.repeat.set(1, 1);
-  }
+  const wrap = ud.tile ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  if (tex.wrapS !== wrap || tex.wrapT !== wrap) { tex.wrapS = tex.wrapT = wrap; tex.needsUpdate = true; }
+  tex.repeat.set(1, 1);
 }
 function tileData(map) { return (map && map.userData && map.userData.tile) ? (map.userData.tileSize || { w: 0, h: 0 }) : null; }
 function tileFaceSize(obj, i, isArr) {
@@ -5360,24 +5353,126 @@ function tileFaceSize(obj, i, isArr) {
   const sz = new THREE.Box3().setFromObject(obj.mesh).getSize(new THREE.Vector3());
   return { w: sz.x || 1, h: sz.y || 1 };
 }
+// Original (untiled) UVs, remembered per geometry so turning Tile off restores them exactly.
+const uvOrig = new WeakMap(); // geometry -> Float32Array | null (null = geometry had no UVs)
+
+// Object size in world units along its OWN axes (geometry box x scale), not the world-axis
+// bounding box, so a flat floor reports its real width/depth instead of a paper-thin height.
+function localSizeOf(mesh) {
+  const g = mesh.geometry;
+  if (!g.boundingBox) g.computeBoundingBox();
+  const sz = g.boundingBox.getSize(new THREE.Vector3());
+  return new THREE.Vector3(sz.x * Math.abs(mesh.scale.x), sz.y * Math.abs(mesh.scale.y), sz.z * Math.abs(mesh.scale.z));
+}
+// Default tile = one whole image fitted onto the object's largest face, at the image's own aspect.
+function defaultTileSize(mesh, tex) {
+  const aspect = (tex.image && tex.image.width && tex.image.height) ? tex.image.width / tex.image.height : 1;
+  const sz = localSizeOf(mesh);
+  const d = [sz.x, sz.y, sz.z].sort((p, q) => q - p);
+  let w = Math.max(d[0], 0.05), h = w / aspect;
+  if (d[1] > 0.05 && h > d[1]) { h = d[1]; w = h * aspect; }
+  return { w, h };
+}
+
+// Tile mode = Roblox-style "studs per tile": every face is box-projected so ONE tile covers
+// exactly (U x V) world units, whatever the face's size or the object's scale. Each vertex is
+// projected along its dominant normal axis, measured from the object's min corner so the first
+// tile starts flush at the corner. Faces carrying text textures keep their original UVs.
 function refreshTiles(obj) {
-  if (!obj.mesh || !obj.mesh.material) return;
-  const isArr = Array.isArray(obj.mesh.material);
-  (isArr ? obj.mesh.material : [obj.mesh.material]).forEach((m, i) => {
-    if (m.map && !m.map.isTextTexture) applyTextureModeToTexture(m.map, tileFaceSize(obj, i, isArr));
+  const mesh = obj.mesh;
+  if (!mesh || !mesh.material || !mesh.geometry) return;
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  if (!pos) return;
+  const isArr = Array.isArray(mesh.material);
+  const mats = isArr ? mesh.material : [mesh.material];
+
+  let anyTile = false;
+  mats.forEach(m => {
+    const t = m.map;
+    if (!t || t.isTextTexture) return;
+    applyTextureModeToTexture(t);
+    if (t.userData.tile) {
+      anyTile = true;
+      const ts = t.userData.tileSize;
+      if (!ts || !(ts.w > 0) || !(ts.h > 0)) t.userData.tileSize = defaultTileSize(mesh, t);
+    }
   });
+  if (!anyTile && !uvOrig.has(geo)) return; // nothing tiled, nothing to undo
+
+  if (!uvOrig.has(geo)) uvOrig.set(geo, geo.attributes.uv ? Float32Array.from(geo.attributes.uv.array) : null);
+  const orig = uvOrig.get(geo);
+
+  if (!anyTile) { // Tile just turned off: put the original UVs back
+    if (orig && geo.attributes.uv) { geo.attributes.uv.array.set(orig); geo.attributes.uv.needsUpdate = true; }
+    else if (!orig && geo.attributes.uv) geo.deleteAttribute('uv');
+    uvOrig.delete(geo);
+    return;
+  }
+
+  let uvAttr = geo.attributes.uv;
+  if (!uvAttr || uvAttr.count !== pos.count) {
+    uvAttr = new THREE.BufferAttribute(new Float32Array(pos.count * 2), 2);
+    geo.setAttribute('uv', uvAttr);
+    mats.forEach(m => { m.needsUpdate = true; }); // shader needs the UV attribute now
+  }
+  if (!geo.attributes.normal) geo.computeVertexNormals();
+  const nor = geo.attributes.normal;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+
+  // which material (hence which tile size) each vertex belongs to
+  const vmat = new Uint16Array(pos.count);
+  if (isArr) {
+    const idx = geo.index;
+    geo.groups.forEach(g => {
+      for (let i = g.start; i < g.start + g.count; i++) vmat[idx ? idx.getX(i) : i] = g.materialIndex;
+    });
+  }
+
+  const sx = Math.abs(mesh.scale.x), sy = Math.abs(mesh.scale.y), sz = Math.abs(mesh.scale.z);
+  const uvArr = uvAttr.array;
+  for (let v = 0; v < pos.count; v++) {
+    const m = mats[vmat[v]] || mats[0];
+    const t = m && m.map && !m.map.isTextTexture && m.map.userData.tile ? m.map : null;
+    if (!t) { // untiled / text face: original UVs
+      uvArr[v * 2] = orig ? orig[v * 2] : 0;
+      uvArr[v * 2 + 1] = orig ? orig[v * 2 + 1] : 0;
+      continue;
+    }
+    const ts = t.userData.tileSize;
+    const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
+    const nx = nor.getX(v), ny = nor.getY(v), nz = nor.getZ(v);
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    let a, b;
+    if (ax >= ay && ax >= az) { a = (nx >= 0 ? (bb.max.z - z) : (z - bb.min.z)) * sz; b = (y - bb.min.y) * sy; }
+    else if (ay >= az)        { a = (x - bb.min.x) * sx; b = (ny >= 0 ? (bb.max.z - z) : (z - bb.min.z)) * sz; }
+    else                      { a = (nz >= 0 ? (x - bb.min.x) : (bb.max.x - x)) * sx; b = (y - bb.min.y) * sy; }
+    uvArr[v * 2] = a / ts.w;
+    uvArr[v * 2 + 1] = b / ts.h;
+  }
+  uvAttr.needsUpdate = true;
 }
 function reapplyTextureModeToAllImageTextures() { objects.forEach(refreshTiles); }
-// Runs every frame: when a tiled object's scale changes (gizmo, inspector, undo, animation),
-// recompute how many copies fit. Cheap — skipped unless the scale actually changed.
+// Runs every frame: re-projects tiled UVs whenever anything that affects them changes
+// (scale via gizmo / inspector / undo / animation, tile size, tile on/off, image, geometry).
 function updateTiledTextures() {
   objects.forEach(o => {
-    const m = o.mesh; if (!m || !m.material) return;
+    const m = o.mesh; if (!m || !m.material || !m.geometry) return;
     const mats = Array.isArray(m.material) ? m.material : [m.material];
-    if (!mats.some(x => x.map && x.map.userData && x.map.userData.tile)) return;
-    const k = m.scale.x + ',' + m.scale.y + ',' + m.scale.z;
+    const hasTile = mats.some(x => x.map && x.map.userData && x.map.userData.tile && !x.map.isTextTexture);
+    let k = '';
+    if (hasTile || uvOrig.has(m.geometry)) {
+      k = m.geometry.uuid + '|' + m.scale.x + ',' + m.scale.y + ',' + m.scale.z + '|' + mats.map(x => {
+        const t = x.map;
+        if (!t) return '-';
+        const ts = t.userData.tileSize;
+        return t.uuid + ':' + (t.userData.tile ? 1 : 0) + ':' + (ts ? ts.w + ',' + ts.h : '');
+      }).join(';');
+    }
     if (o.__tileKey === k) return;
-    o.__tileKey = k; refreshTiles(o);
+    o.__tileKey = k;
+    if (k) refreshTiles(o);
   });
 }
 
