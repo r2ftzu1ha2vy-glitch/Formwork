@@ -3676,11 +3676,16 @@ window.addEventListener('keydown', (e) => {
       || document.getElementById('meshModalOverlay').classList.contains('open');
     const field = document.getElementById(lastTransformField);
     if (field && !modalOpen && selected && !cinema.active) {
-      e.preventDefault();
       field.focus();
       field.select();
-      field.value = e.key;
-      field.dispatchEvent(new Event('input', { bubbles: true }));
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        field.value = e.key;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      // '-' and '.' are NOT valid numbers on their own, so a number input would throw them away if we
+      // wrote them into .value. Let the browser type them natively into the now-focused, fully-selected
+      // field instead: they replace the old value and the following digits complete it (e.g. -5, 0.25).
       return;
     }
   }
