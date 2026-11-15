@@ -1473,18 +1473,15 @@ transformControls.addEventListener('dragging-changed', (e) => {
     const target = transformControls.object;
     const isRealMesh = target && target !== multiProxy && (typeof editPivot === 'undefined' || target !== editPivot);
     if (transformControls.mode === 'scale' && isRealMesh) {
-      resizeSnapPrevBox = new THREE.Box3().setFromObject(target);
       oneSidedPrevBox = new THREE.Box3().setFromObject(target);
       oneSidedPrevScale = target.scale.clone();
       oneSidedPinFace = null; // undecided until the first tick of this drag reveals which handle moved
     } else {
-      resizeSnapPrevBox = null;
       oneSidedPrevBox = null;
       oneSidedPrevScale = null;
       oneSidedPinFace = null;
     }
   } else {
-    resizeSnapPrevBox = null;
     oneSidedPrevBox = null;
     oneSidedPrevScale = null;
   }
@@ -1743,7 +1740,6 @@ let scaleSnapAmount = 0.25;
 let moveSnapAmount = 0.5;
 let rotateSnapDeg = 15;
 let resizeMode = 'one-sided'; // 'symmetric' | 'one-sided'
-let resizeNeighborSnapEnabled = true; // whether scaling near another object snaps flush against it
 let nextImageTile = false; // inspector toggle: tile the NEXT uploaded image (and shows current state)
 let textureMode = 'normal'; // 'normal' (stretch to fill face) | 'tile' (repeat at native aspect, never stretched)
 const undoStack = [];
@@ -2857,82 +2853,6 @@ function focusCameraOnSelection() {
   orbit.update();
 
   showToast(selObjs.length === 1 ? `Focused ${selObjs[0].name}` : `Focused ${selObjs.length} objects`);
-}
-
-// ---- Edge-to-edge snapping helpers (used on top of grid snapping) ----
-// When snap-to-grid is on, moving or resizing a part close enough to a neighboring
-// part's edge will snap flush against it, in addition to the regular grid increments.
-// World units - how close an edge needs to be to trigger a snap. Scales with the move increment:
-// the nearest grid position to a flush spot can be up to half an increment away, so the pull
-// range must be at least that or parts with off-grid sizes can never sit flush.
-function edgeSnapThreshold() {
-  const inc = (typeof moveSnapAmount === 'number' && moveSnapAmount > 0) ? moveSnapAmount : 0.5;
-  return Math.min(Math.max(0.3, inc * 0.5 + 0.1), inc * 0.95);
-}
-let resizeSnapPrevBox = null;
-
-function boxesOverlapOtherAxes(a, b, axis, margin=0.02) {
-  const axes = ['x','y','z'].filter(ax => ax !== axis);
-  return axes.every(ax => a.max[ax] > b.min[ax] - margin && a.min[ax] < b.max[ax] + margin);
-}
-
-// Finds the smallest delta (along `axis`) needed to bring `box`'s given face flush
-// against the nearest candidate box, if one is within EDGE_SNAP_THRESHOLD.
-function computeFaceSnapDelta(box, candidates, axis, face) {
-  let best = null;
-  candidates.forEach(cbox => {
-    if (!boxesOverlapOtherAxes(box, cbox, axis)) return;
-    const d = face === 'max' ? (cbox.min[axis] - box.max[axis]) : (cbox.max[axis] - box.min[axis]);
-    if (Math.abs(d) <= edgeSnapThreshold() && (best === null || Math.abs(d) < Math.abs(best))) best = d;
-  });
-  return best;
-}
-
-// For translate: checks both faces on this axis, returns whichever snap is closer (or null).
-function computeEdgeSnapDelta(movingBox, candidates, axis) {
-  const dMax = computeFaceSnapDelta(movingBox, candidates, axis, 'max');
-  const dMin = computeFaceSnapDelta(movingBox, candidates, axis, 'min');
-  if (dMax === null) return dMin;
-  if (dMin === null) return dMax;
-  return Math.abs(dMax) <= Math.abs(dMin) ? dMax : dMin;
-}
-
-// For resize: grows/shrinks just the moving edge, keeping the opposite edge fixed.
-// Assumes the mesh is axis-aligned (unrotated) - good enough for typical panel/box parts.
-function adjustMeshFaceOnAxis(mesh, axis, face, delta) {
-  const box = new THREE.Box3().setFromObject(mesh);
-  const size0 = box.max[axis] - box.min[axis];
-  if (size0 <= 1e-6) return;
-  const newSize = face === 'max' ? size0 + delta : size0 - delta;
-  if (newSize <= 0.001) return; // don't collapse/flip the mesh
-  const scaleFactor = newSize / size0;
-  mesh.scale[axis] *= scaleFactor;
-  // Scaling the mesh about its own origin moves BOTH faces symmetrically by
-  // (newSize-size0)/2 = delta/2 in the direction that face is growing. To keep
-  // the *opposite* face pinned, shift the mesh by the amount needed so only the
-  // target face actually moves by `delta`: +delta/2 when growing the max face
-  // (pins min), and -delta/2 when growing the min face (pins max). Using the
-  // same sign for both cases (the old bug) left the mesh drifting whenever the
-  // min face was the one being snapped/resized.
-  mesh.position[axis] += face === 'max' ? delta / 2 : -delta / 2;
-}
-
-function applyResizeEdgeSnap(obj) {
-  if (!resizeSnapPrevBox) { resizeSnapPrevBox = new THREE.Box3().setFromObject(obj.mesh); return; }
-  const newBox = new THREE.Box3().setFromObject(obj.mesh);
-  const others = objects.filter(o => o.id !== obj.id).map(o => new THREE.Box3().setFromObject(o.mesh));
-  ['x','y','z'].forEach(axis => {
-    const grewMax = newBox.max[axis] - resizeSnapPrevBox.max[axis];
-    const grewMin = resizeSnapPrevBox.min[axis] - newBox.min[axis];
-    if (Math.abs(grewMax) > 1e-6 && Math.abs(grewMax) >= Math.abs(grewMin)) {
-      const d = computeFaceSnapDelta(newBox, others, axis, 'max');
-      if (d !== null) adjustMeshFaceOnAxis(obj.mesh, axis, 'max', d);
-    } else if (Math.abs(grewMin) > 1e-6) {
-      const d = computeFaceSnapDelta(newBox, others, axis, 'min');
-      if (d !== null) adjustMeshFaceOnAxis(obj.mesh, axis, 'min', d);
-    }
-  });
-  resizeSnapPrevBox = new THREE.Box3().setFromObject(obj.mesh);
 }
 
 // When dragging the proxy, propagate to real objects
@@ -5247,16 +5167,6 @@ function setResizeMode(mode) {
 }
 resizeModeControl.querySelectorAll('.seg-opt').forEach(opt => {
   opt.addEventListener('click', () => setResizeMode(opt.dataset.value));
-});
-
-// Neighbor-snap-during-resize toggle
-document.getElementById('resize-neighbor-snap-control').querySelectorAll('.seg-opt').forEach(opt => {
-  opt.addEventListener('click', () => {
-    document.querySelectorAll('#resize-neighbor-snap-control .seg-opt').forEach(o => o.classList.remove('active'));
-    opt.classList.add('active');
-    resizeNeighborSnapEnabled = opt.dataset.value === 'on';
-    showToast(resizeNeighborSnapEnabled ? 'Snap-to-neighbor resize: On' : 'Snap-to-neighbor resize: Off');
-  });
 });
 
 // Image texture mode: Normal (stretch to fill) vs Tile (repeat at native aspect, never stretched).
