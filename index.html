@@ -2463,7 +2463,7 @@ function copySelected() {
       return { isGroup: true, name: obj.name, members: members.map(m => cloneMeshDataFor(m)) };
     }
     if (obj.type === 'model') {
-      return { isModel: true, modelId: obj.modelId, part: obj.part, name: obj.name, collision: obj.collision,
+      return { isModel: true, modelId: obj.modelId, part: obj.part, customClips: obj.customClips ? JSON.parse(JSON.stringify(obj.customClips)) : null, name: obj.name, collision: obj.collision,
         pos: obj.mesh.position.clone(), quat: obj.mesh.quaternion.clone(), scale: obj.mesh.scale.clone(),
         clipIndex: obj.clipIndex, playing: obj.playing, speed: obj.speed, loop: obj.loop };
     }
@@ -2503,7 +2503,7 @@ function pasteClipboard() {
       nextClipboard.push({ ...entry, members: entry.members.map((data, i) => ({ ...data, pos: copies[i].mesh.position.clone() })) });
     } else if (entry.isModel) {
       const newObj = addModelObject(entry.modelId, {
-        name: entry.name + ' copy', collision: entry.collision, part: entry.part,
+        name: entry.name + ' copy', collision: entry.collision, part: entry.part, customClips: entry.customClips,
         position: entry.pos.clone().add(offset), quaternion: entry.quat.clone(), scale: entry.scale.clone(),
         clipIndex: entry.clipIndex, playing: entry.playing, speed: entry.speed, loop: entry.loop
       });
@@ -4177,6 +4177,10 @@ function pruneSceneToPart(sceneClone, partIndex) {
 }
 // The clips that belong to a live model object (its own character's, or the whole file's).
 function modelClipsFor(o) {
+  if (o.customClips) {
+    if (!o._clipObjs) o._clipObjs = o.customClips.map(j => THREE.AnimationClip.parse(j));
+    return o._clipObjs;
+  }
   const rec = modelStore.get(o.modelId);
   const p = rec && rec.parsed;
   if (!p) return [];
@@ -4196,6 +4200,12 @@ function splitModelIntoCharacters(o) {
   if (!parts || !rec || !o.content || o.part != null) { showToast('Nothing to split', true); return; }
   pushUndo();
   o.mesh.updateMatrix();
+  let customByPart = null;
+  if (o.customClips) {
+    const chars = findModelCharacterNodes(rec.parsed.scene);
+    const live = modelClipsFor(o);
+    if (chars) customByPart = chars.map(n => buildPartClips(n, live).map(c => THREE.AnimationClip.toJSON(c)));
+  }
   const made = parts.map((part, i) => {
     const local = new THREE.Vector3(
       part.fit.center[0] + rec.fit.offset[0],
@@ -4203,7 +4213,7 @@ function splitModelIntoCharacters(o) {
       part.fit.center[2] + rec.fit.offset[2]
     ).applyMatrix4(o.mesh.matrix);
     return addModelObject(o.modelId, {
-      name: part.name, part: i, collision: o.collision,
+      name: part.name, part: i, collision: o.collision, customClips: customByPart ? customByPart[i] : undefined,
       position: local, quaternion: o.mesh.quaternion.clone(), scale: o.mesh.scale.clone(),
       clipIndex: o.clipIndex, clipTime: o.action ? o.action.time : 0,
       playing: o.playing, speed: o.speed, loop: o.loop
@@ -4235,6 +4245,7 @@ function addModelObject(modelId, o = {}) {
   const obj = {
     id, mesh: wrapper, name: o.name || rec.name || 'Model', type: 'model',
     collision: o.collision !== false, modelId, part: o.part != null ? o.part : null,
+    customClips: o.customClips ? JSON.parse(JSON.stringify(o.customClips)) : null, _clipObjs: null,
     content: null, mixer: null, action: null,
     clipIndex: o.clipIndex, clipTime: o.clipTime || 0,
     playing: o.playing !== false, speed: o.speed ?? 1, loop: o.loop !== false
@@ -4296,6 +4307,7 @@ function applyModelClip(o) {
 function snapshotModel(o, pos, rot, scale) {
   return {
     id: o.id, name: o.name, type: 'model', modelId: o.modelId, part: o.part != null ? o.part : null,
+    customClips: o.customClips ? JSON.parse(JSON.stringify(o.customClips)) : null,
     collision: o.collision !== false,
     pos, rot, scale,
     clipIndex: o.clipIndex, clipTime: o.action ? o.action.time : (o.clipTime || 0),
@@ -4307,7 +4319,7 @@ function snapshotModel(o, pos, rot, scale) {
 function restoreModelFromSnapshot(s) {
   if (!modelStore.has(s.modelId)) { console.warn('Model data missing for', s.name); return; }
   const obj = addModelObject(s.modelId, {
-    id: s.id, name: s.name, collision: s.collision, part: s.part,
+    id: s.id, name: s.name, collision: s.collision, part: s.part, customClips: s.customClips,
     position: new THREE.Vector3().fromArray(s.pos),
     rotation: new THREE.Euler(s.rot[0], s.rot[1], s.rot[2]),
     scale: new THREE.Vector3().fromArray(s.scale),
@@ -4329,7 +4341,7 @@ function duplicateModel(src) {
   src.mesh.matrixWorld.decompose(wp, wq, ws);
   const n = objects.filter(o => o.modelId === src.modelId).length;
   return addModelObject(src.modelId, {
-    name: src.name + ' copy', collision: src.collision, part: src.part,
+    name: src.name + ' copy', collision: src.collision, part: src.part, customClips: src.customClips,
     position: wp.add(pasteOffset()), quaternion: wq, scale: ws,
     clipIndex: src.clipIndex, clipTime: src.action ? src.action.time : 0,
     playing: src.playing, speed: src.speed, loop: src.loop,
@@ -4389,6 +4401,379 @@ function breakModelIntoMeshes(o) {
   setSelection(made);
   refreshOutliner(); refreshEmptyState();
   showToast(`Split "${o.name}" into ${made.length} editable mesh${made.length !== 1 ? 'es' : ''}`);
+}
+
+// ==================================================================
+// ---------------- RIG ANIMATION EDITOR (bone-level keyframes) ----------------
+// ==================================================================
+// Edits the skeletal clips that came with an imported model. The first edit copies the model's
+// clips into o.customClips (AnimationClip JSON: saved with the project, undo, copy/paste, split and
+// exported to GLB); after that every edit is a keyframe written straight into that clip.
+// <rig-core>
+function rigBones(o) {
+  const list = [];
+  if (o.content) o.content.traverse(c => { if (c.isBone && c.name) list.push(c); });
+  return list;
+}
+function ensureCustomClips(o) {
+  if (o.customClips) { modelClipsFor(o); return; }
+  const src = modelClipsFor(o);
+  o._clipObjs = src.map(c => {
+    const tracks = c.tracks.map(tr => {
+      const cubic = tr.createInterpolant && tr.createInterpolant.isInterpolantFactoryMethodGLTFCubicSpline;
+      if (!cubic) return tr.clone();
+      // glTF cubic-spline tracks carry tangents; flatten them to plain linear keys so they are editable.
+      const interp = tr.createInterpolant();
+      const size = interp.valueSize, vals = [];
+      for (let i = 0; i < tr.times.length; i++) { const r = interp.evaluate(tr.times[i]); for (let k = 0; k < size; k++) vals.push(r[k]); }
+      return new tr.constructor(tr.name, Array.from(tr.times), vals);
+    });
+    return new THREE.AnimationClip(c.name, c.duration, tracks);
+  });
+  o.customClips = o._clipObjs.map(c => THREE.AnimationClip.toJSON(c));
+}
+function commitRig(o) { o.customClips = o._clipObjs.map(c => THREE.AnimationClip.toJSON(c)); }
+
+function rigSetKey(clip, bone, prop, t, vals) {
+  const isQ = prop === 'quaternion', n = isQ ? 4 : 3;
+  const C = isQ ? THREE.QuaternionKeyframeTrack : THREE.VectorKeyframeTrack;
+  const name = bone + '.' + prop;
+  const idx = clip.tracks.findIndex(tr => tr.name === name);
+  let times = [], values = [], interp;
+  if (idx >= 0) { times = Array.from(clip.tracks[idx].times); values = Array.from(clip.tracks[idx].values); interp = clip.tracks[idx].getInterpolation(); }
+  t = Math.round(t * 1000) / 1000;
+  let k = times.findIndex(x => Math.abs(x - t) < 0.0005);
+  if (k >= 0) { for (let i = 0; i < n; i++) values[k * n + i] = vals[i]; }
+  else {
+    k = times.findIndex(x => x > t);
+    if (k < 0) k = times.length;
+    times.splice(k, 0, t);
+    values.splice(k * n, 0, ...Array.from(vals).slice(0, n));
+  }
+  const nt = interp !== undefined ? new C(name, times, values, interp) : new C(name, times, values);
+  if (idx >= 0) clip.tracks[idx] = nt; else clip.tracks.push(nt);
+  if (t > clip.duration) clip.duration = t;
+}
+function rigDeleteKey(clip, bone, prop, t) {
+  const name = bone + '.' + prop;
+  const idx = clip.tracks.findIndex(tr => tr.name === name);
+  if (idx < 0) return false;
+  const tr = clip.tracks[idx], n = tr.getValueSize();
+  const times = Array.from(tr.times), values = Array.from(tr.values);
+  const k = times.findIndex(x => Math.abs(x - t) < 0.0005);
+  if (k < 0) return false;
+  times.splice(k, 1); values.splice(k * n, n);
+  if (!times.length) clip.tracks.splice(idx, 1);
+  else clip.tracks[idx] = new tr.constructor(name, times, values, tr.getInterpolation());
+  return true;
+}
+// Sorted key times of a bone in a clip, with which channels (R/P/S) key each time.
+function rigBoneKeyTimes(clip, bone) {
+  const map = new Map();
+  const tag = { quaternion: 'R', position: 'P', scale: 'S' };
+  clip.tracks.forEach(tr => {
+    const dot = tr.name.lastIndexOf('.');
+    if (tr.name.slice(0, dot) !== bone) return;
+    const ch = tag[tr.name.slice(dot + 1)]; if (!ch) return;
+    Array.from(tr.times).forEach(t => { const key = Math.round(t * 1000) / 1000; map.set(key, (map.get(key) || '') + ch); });
+  });
+  return [...map.entries()].sort((a, b) => a[0] - b[0]);
+}
+// Drops keys that a straight line between their neighbours reproduces within tolerance (and makes
+// the track linear). Turns dense baked tracks (e.g. 30 keys/second) into a handful of editable keys.
+function rigSimplifyTrack(tr, tolPos, tolRot) {
+  const n = tr.times.length;
+  if (n <= 8) return tr;
+  const isQ = tr.ValueTypeName === 'quaternion', sz = isQ ? 4 : 3;
+  const T = tr.times, V = tr.values;
+  const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), qi = new THREE.Quaternion();
+  const err = (i, a, b) => {
+    const u = (T[i] - T[a]) / (T[b] - T[a]);
+    if (isQ) {
+      qa.fromArray(V, a * 4); qb.fromArray(V, b * 4); qi.fromArray(V, i * 4);
+      qa.slerp(qb, u);
+      return 2 * Math.acos(Math.min(1, Math.abs(qa.dot(qi))));
+    }
+    let m = 0;
+    for (let k = 0; k < 3; k++) { const v = V[a * 3 + k] + (V[b * 3 + k] - V[a * 3 + k]) * u; m = Math.max(m, Math.abs(v - V[i * 3 + k])); }
+    return m;
+  };
+  const tol = isQ ? tolRot : tolPos;
+  const keep = new Set([0, n - 1]);
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    if (b - a < 2) continue;
+    let worst = -1, we = 0;
+    for (let i = a + 1; i < b; i++) { const e = err(i, a, b); if (e > we) { we = e; worst = i; } }
+    if (worst >= 0 && we > tol) { keep.add(worst); stack.push([a, worst], [worst, b]); }
+  }
+  const idx = [...keep].sort((x, y) => x - y);
+  const times = idx.map(i => T[i]), values = [];
+  idx.forEach(i => { for (let k = 0; k < sz; k++) values.push(V[i * sz + k]); });
+  return new tr.constructor(tr.name, times, values);
+}
+const RIG_SIMPLIFY_LEVELS = { gentle: [0.002, 0.004], medium: [0.004, 0.012], strong: [0.01, 0.04] };
+function rigSimplifyClip(clip, level) {
+  const [tp, tr2] = RIG_SIMPLIFY_LEVELS[level] || RIG_SIMPLIFY_LEVELS.medium;
+  let before = 0, after = 0;
+  clip.tracks = clip.tracks.map(tr => {
+    before += tr.times.length;
+    const nt = rigSimplifyTrack(tr, tp, tr2);
+    after += nt.times.length;
+    return nt;
+  });
+  return { before, after };
+}
+// Runs an edit on the model's active clip, then rebuilds the playing action at the same time so the
+// new keys show immediately. Editing always pauses playback.
+function rigEdit(o, fn) {
+  if (!o.content || !o.mixer || o.clipIndex < 0) { showToast('Pick an animation clip first', true); return false; }
+  ensureCustomClips(o);
+  const clip = modelClipsFor(o)[o.clipIndex];
+  if (!clip) return false;
+  const res = fn(clip);
+  commitRig(o);
+  const t = o.action ? o.action.time : 0;
+  const old = o.action ? o.action.getClip() : null;
+  o.mixer.stopAllAction();
+  if (old) o.mixer.uncacheClip(old);
+  o.playing = false;
+  applyModelClip(o);
+  if (o.action) { o.action.time = Math.min(t, clip.duration); o.mixer.update(0); }
+  return res === undefined ? true : res;
+}
+// </rig-core>
+
+const rigMarker = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 16, 12),
+  new THREE.MeshBasicMaterial({ color: 0xff8a3d, depthTest: false, transparent: true, opacity: 0.95 })
+);
+rigMarker.renderOrder = 9999;
+rigMarker.visible = false;
+rigMarker.userData.__rigMarker = true;
+scene.add(rigMarker);
+const _rigV = new THREE.Vector3();
+function updateRigMarker() {
+  const o = selected;
+  if (!o || o.type !== 'model' || !o.content || !o._rigOpen || !o.editBone) { rigMarker.visible = false; return; }
+  const b = o.content.getObjectByName(o.editBone);
+  if (!b) { rigMarker.visible = false; return; }
+  b.getWorldPosition(_rigV);
+  rigMarker.position.copy(_rigV);
+  rigMarker.scale.setScalar(0.035 * Math.max(0.05, o.mesh.scale.x) * Math.max(0.2, o.content.scale.x));
+  rigMarker.visible = true;
+}
+
+const _r3 = (v) => (Math.round(v * 1000) / 1000);
+function rigCurTime(o) {
+  return o.action ? _r3(Math.min(o.action.time, o.action.getClip().duration)) : 0;
+}
+function rigSeek(o, t) {
+  if (!o.action) return;
+  const dur = o.action.getClip().duration;
+  o.playing = false;
+  o.action.paused = true;
+  o.action.time = Math.max(0, Math.min(dur, t));
+  o.mixer.update(0);
+  const pb = document.getElementById('f-model-play'); if (pb) pb.textContent = '▶ Play';
+  syncRigFields(o);
+  renderRigKeys(o);
+}
+
+function rigEditorHTML(o, anims, loading) {
+  if (loading || !anims.length) return '';
+  const bones = rigBones(o);
+  if (!bones.length) return '';
+  if (!o.editBone || !bones.some(b => b.name === o.editBone)) {
+    const clip = anims[o.clipIndex];
+    const animated = clip ? bones.find(b => clip.tracks.some(tr => tr.name.startsWith(b.name + '.'))) : null;
+    o.editBone = (animated || bones[0]).name;
+  }
+  const btn = 'padding:6px 8px; background:var(--bg-2); border:1px solid var(--border); border-radius:6px; color:var(--text-0); cursor:pointer; font-size:12px;';
+  const axisRow = (a) => `<div class="slider-row" style="margin-bottom:4px; gap:6px;"><span style="width:12px; font-size:11px; opacity:.7;">${a.toUpperCase()}</span><input type="range" id="rig-r${a}" min="-180" max="180" step="1" value="0" style="flex:1;"><input type="number" id="rig-rn${a}" step="1" value="0" style="width:58px;"></div>`;
+  const xyz = (pre, step) => ['x', 'y', 'z'].map(a => `<div class="xyz-field ${a}"><span class="axis">${a.toUpperCase()}</span><input type="number" step="${step}" id="rig-${pre}${a}" value="0"></div>`).join('');
+  const hasClip = o.clipIndex >= 0 && anims[o.clipIndex];
+  return `
+    <div class="insp-section">
+      <details id="rig-details" ${o._rigOpen ? 'open' : ''}>
+        <summary style="cursor:pointer; font-weight:600; font-size:12px; margin-bottom:8px;">Edit animation (bones &amp; keyframes)${o.customClips ? ' <span style="color:var(--accent); font-weight:400;">· edited</span>' : ''}</summary>
+        ${hasClip ? `
+        <div class="insp-empty" style="text-align:left; padding:0 0 8px;">Move the time slider (or type a time), choose a bone, then change its rotation / position / scale. Each change writes a keyframe at the current time. Playback pauses while you edit.</div>
+        <div class="field-label" style="margin-top:0;">Time (s) <span id="rig-dur" style="opacity:.6;"></span></div>
+        <div style="display:flex; gap:6px; margin-bottom:8px;">
+          <button id="rig-prev" style="${btn}">◀ Key</button>
+          <input type="number" id="rig-time" step="0.01" min="0" style="flex:1; min-width:0;">
+          <button id="rig-next" style="${btn}">Key ▶</button>
+        </div>
+        <div class="field-label">Bone</div>
+        <select id="rig-bone" style="width:100%; padding:7px; background:var(--bg-2); border:1px solid var(--border); border-radius:6px; color:var(--text-0); margin-bottom:8px;">
+          ${bones.map(b => `<option value="${_escHtml(b.name)}" ${b.name === o.editBone ? 'selected' : ''}>${_escHtml(b.name)}</option>`).join('')}
+        </select>
+        <div class="field-label">Rotation (°)</div>
+        ${axisRow('x')}${axisRow('y')}${axisRow('z')}
+        <div class="field-label">Position</div>
+        <div class="xyz-row">${xyz('p', '0.01')}</div>
+        <div class="field-label">Scale</div>
+        <div class="xyz-row">${xyz('s', '0.01')}</div>
+        <div style="display:flex; gap:6px; margin:8px 0;">
+          <button id="rig-keyall" style="${btn} flex:1;" title="Write a key for every bone at the current time, from the pose you are looking at">Key all bones</button>
+          <button id="rig-delkey" style="${btn} flex:1;" title="Delete this bone's keys at the current time">Delete key</button>
+        </div>
+        <div class="field-label">Keys on this bone <span id="rig-keycount" style="opacity:.6;"></span></div>
+        <div id="rig-keys" style="display:flex; flex-wrap:wrap; gap:4px; max-height:84px; overflow:auto; margin-bottom:10px;"></div>
+        <div class="field-label">Clip tools</div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+          <button id="rig-dup" style="${btn}">Duplicate</button>
+          <button id="rig-ren" style="${btn}">Rename</button>
+          <button id="rig-del" style="${btn}">Delete</button>
+          <button id="rig-simp" style="${btn}" title="Remove redundant keys so dense baked clips become easy to edit (turns stepped tracks into smooth linear ones)">Simplify keys</button>
+          <select id="rig-simp-lv" title="How aggressively to remove keys" style="${btn}"><option value="gentle">Gentle</option><option value="medium" selected>Medium</option><option value="strong">Strong</option></select>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; font-size:12px;">Duration (s) <input type="number" id="rig-clipdur" step="0.05" min="0.05" style="width:80px;"></div>
+        ` : `<div class="insp-empty" style="text-align:left; padding:0;">Pick a clip in the dropdown above to edit it.</div>`}
+      </details>
+    </div>`;
+}
+
+function syncRigFields(o) {
+  const $ = (id) => document.getElementById(id);
+  const boneName = o.editBone, bone = o.content && boneName ? o.content.getObjectByName(boneName) : null;
+  if (!bone || !$('rig-time')) return;
+  const active = document.activeElement;
+  const setv = (id, v) => { const el = $(id); if (el && el !== active) el.value = v; };
+  setv('rig-time', rigCurTime(o).toFixed(3));
+  const d = $('rig-dur'); if (d && o.action) d.textContent = '/ ' + o.action.getClip().duration.toFixed(2) + 's';
+  const cd = $('rig-clipdur'); if (cd && o.action && cd !== active) cd.value = o.action.getClip().duration.toFixed(2);
+  const e = new THREE.Euler().setFromQuaternion(bone.quaternion, 'XYZ');
+  ['x', 'y', 'z'].forEach(a => {
+    const deg = Math.round(THREE.MathUtils.radToDeg(e[a]));
+    setv('rig-r' + a, deg); setv('rig-rn' + a, deg);
+    setv('rig-p' + a, bone.position[a].toFixed(3));
+    setv('rig-s' + a, bone.scale[a].toFixed(3));
+  });
+}
+
+function renderRigKeys(o) {
+  const box = document.getElementById('rig-keys');
+  if (!box || !o.action) return;
+  const clip = o.action.getClip();
+  const keys = rigBoneKeyTimes(clip, o.editBone);
+  const cur = rigCurTime(o);
+  const cnt = document.getElementById('rig-keycount'); if (cnt) cnt.textContent = '(' + keys.length + ')';
+  box.innerHTML = keys.length ? keys.map(([t, ch]) => {
+    const on = Math.abs(t - cur) < 0.0005;
+    return `<span data-t="${t}" title="${ch}" style="cursor:pointer; font-size:11px; padding:2px 6px; border-radius:4px; border:1px solid ${on ? 'var(--accent)' : 'var(--border)'}; color:${on ? 'var(--accent)' : 'var(--text-1,#bbb)'};">${t.toFixed(2)}</span>`;
+  }).join('') : '<span style="font-size:11px; opacity:.6;">No keys on this bone in this clip.</span>';
+  box.querySelectorAll('[data-t]').forEach(el => el.addEventListener('click', () => rigSeek(o, parseFloat(el.dataset.t))));
+}
+
+function wireRigEditor(o) {
+  const det = document.getElementById('rig-details');
+  if (!det) return;
+  const $ = (id) => document.getElementById(id);
+  det.addEventListener('toggle', () => { o._rigOpen = det.open; if (det.open) { syncRigFields(o); renderRigKeys(o); } });
+  if (!$('rig-bone')) return;
+  syncRigFields(o); renderRigKeys(o);
+
+  $('rig-bone').addEventListener('change', (e) => { o.editBone = e.target.value; syncRigFields(o); renderRigKeys(o); });
+  $('rig-time').addEventListener('change', (e) => rigSeek(o, parseFloat(e.target.value) || 0));
+  $('rig-prev').addEventListener('click', () => {
+    const t = rigCurTime(o); const ks = rigBoneKeyTimes(o.action.getClip(), o.editBone).map(k => k[0]).filter(k => k < t - 0.0005);
+    if (ks.length) rigSeek(o, ks[ks.length - 1]); else showToast('No earlier key on this bone');
+  });
+  $('rig-next').addEventListener('click', () => {
+    const t = rigCurTime(o); const ks = rigBoneKeyTimes(o.action.getClip(), o.editBone).map(k => k[0]).filter(k => k > t + 0.0005);
+    if (ks.length) rigSeek(o, ks[0]); else showToast('No later key on this bone');
+  });
+
+  // one undo step per slider drag / typed change
+  let armed = false;
+  const arm = () => { if (!armed) { pushUndo(); armed = true; } };
+  const disarm = () => { armed = false; };
+  const num = (id) => parseFloat($(id).value) || 0;
+
+  const writeRot = (srcId) => {
+    arm();
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+      THREE.MathUtils.degToRad(num('rig-rx')), THREE.MathUtils.degToRad(num('rig-ry')), THREE.MathUtils.degToRad(num('rig-rz')), 'XYZ'));
+    const t = rigCurTime(o);
+    rigEdit(o, clip => rigSetKey(clip, o.editBone, 'quaternion', t, [q.x, q.y, q.z, q.w]));
+    renderRigKeys(o);
+  };
+  ['x', 'y', 'z'].forEach(a => {
+    const sl = $('rig-r' + a), nb = $('rig-rn' + a);
+    sl.addEventListener('input', () => { nb.value = sl.value; writeRot(sl.id); });
+    sl.addEventListener('change', disarm);
+    nb.addEventListener('change', () => { sl.value = nb.value; writeRot(nb.id); disarm(); });
+  });
+  const writeVec = (prefix, prop) => {
+    arm();
+    const v = ['x', 'y', 'z'].map(a => num('rig-' + prefix + a));
+    const t = rigCurTime(o);
+    rigEdit(o, clip => rigSetKey(clip, o.editBone, prop, t, v));
+    renderRigKeys(o); disarm();
+  };
+  ['x', 'y', 'z'].forEach(a => {
+    $('rig-p' + a).addEventListener('change', () => writeVec('p', 'position'));
+    $('rig-s' + a).addEventListener('change', () => writeVec('s', 'scale'));
+  });
+
+  $('rig-keyall').addEventListener('click', () => {
+    pushUndo();
+    const t = rigCurTime(o);
+    const pose = rigBones(o).map(b => ({ n: b.name, q: b.quaternion.clone(), p: b.position.clone(), s: b.scale.clone() }));
+    rigEdit(o, clip => pose.forEach(b => {
+      rigSetKey(clip, b.n, 'quaternion', t, [b.q.x, b.q.y, b.q.z, b.q.w]);
+      rigSetKey(clip, b.n, 'position', t, [b.p.x, b.p.y, b.p.z]);
+      rigSetKey(clip, b.n, 'scale', t, [b.s.x, b.s.y, b.s.z]);
+    }));
+    renderRigKeys(o); showToast(`Keyed ${pose.length} bones at ${t.toFixed(2)}s`);
+  });
+  $('rig-delkey').addEventListener('click', () => {
+    const t = rigCurTime(o);
+    const near = rigBoneKeyTimes(o.action.getClip(), o.editBone).map(k => k[0]).find(k => Math.abs(k - t) < 0.02);
+    if (near === undefined) { showToast('No key on this bone at this time', true); return; }
+    pushUndo();
+    rigEdit(o, clip => { ['quaternion', 'position', 'scale'].forEach(p => rigDeleteKey(clip, o.editBone, p, near)); });
+    syncRigFields(o); renderRigKeys(o);
+  });
+
+  $('rig-simp').addEventListener('click', () => {
+    pushUndo();
+    let r = null;
+    rigEdit(o, clip => { r = rigSimplifyClip(clip, $('rig-simp-lv').value); });
+    if (r) showToast(`Simplified: ${r.before} → ${r.after} keys`);
+    syncRigFields(o); renderRigKeys(o);
+  });
+  $('rig-clipdur').addEventListener('change', (e) => {
+    const v = Math.max(0.05, parseFloat(e.target.value) || 0.05);
+    pushUndo(); rigEdit(o, clip => { clip.duration = v; }); syncRigFields(o);
+  });
+  $('rig-dup').addEventListener('click', () => {
+    ensureCustomClips(o);
+    const clips = modelClipsFor(o), src = clips[o.clipIndex]; if (!src) return;
+    pushUndo();
+    const c = src.clone(); c.name = src.name + ' copy';
+    clips.push(c); commitRig(o);
+    o.clipIndex = clips.length - 1; applyModelClip(o); refreshInspector();
+  });
+  $('rig-ren').addEventListener('click', () => {
+    ensureCustomClips(o);
+    const clip = modelClipsFor(o)[o.clipIndex]; if (!clip) return;
+    const nm = prompt('Rename animation', clip.name); if (!nm || !nm.trim()) return;
+    pushUndo(); clip.name = nm.trim(); commitRig(o); refreshInspector();
+  });
+  $('rig-del').addEventListener('click', () => {
+    ensureCustomClips(o);
+    const clips = modelClipsFor(o), clip = clips[o.clipIndex]; if (!clip) return;
+    if (!confirm(`Delete animation "${clip.name}" from this model?`)) return;
+    pushUndo();
+    if (o.action) { o.mixer.stopAllAction(); o.mixer.uncacheClip(o.action.getClip()); }
+    clips.splice(o.clipIndex, 1); commitRig(o);
+    o.clipIndex = clips.length ? Math.min(o.clipIndex, clips.length - 1) : -1;
+    applyModelClip(o); refreshInspector();
+  });
 }
 
 // ---------- model inspector ----------
@@ -4455,6 +4840,8 @@ function renderModelInspector(o) {
         </div>` : `<div class="insp-empty" style="text-align:left; padding:0;">${loading ? '' : 'This file has no animation clips.'}</div>`}
     </div>
 
+    ${rigEditorHTML(o, anims, loading)}
+
     <div class="insp-section">
       <label style="display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:10px;"><input type="checkbox" id="f-model-solid" ${o.collision !== false ? 'checked' : ''}> Solid (collision)</label>
       ${parts && o.part == null && !loading ? `<button id="f-model-split" style="${btnCss} margin-bottom:8px;" title="This file contains ${parts.length} separate rigged characters. Split them into individual models; each keeps its own animations.">Split into ${parts.length} individual models (${_escHtml(parts.map(p => p.name).join(', '))})</button>` : ''}
@@ -4472,6 +4859,7 @@ function renderModelInspector(o) {
   document.getElementById('f-model-break').addEventListener('click', () => breakModelIntoMeshes(o));
   const splitBtn = document.getElementById('f-model-split');
   if (splitBtn) splitBtn.addEventListener('click', () => splitModelIntoCharacters(o));
+  wireRigEditor(o);
 
   const clipSel = document.getElementById('f-model-clip');
   if (clipSel) {
@@ -4502,6 +4890,7 @@ function renderModelInspector(o) {
       o.action.time = (parseFloat(timeEl.value) / 1000) * o.action.getClip().duration;
       o.mixer.update(0);
       document.getElementById('f-model-play').textContent = '▶ Play';
+      syncRigFields(o);
     });
     const speedEl = document.getElementById('f-model-speed');
     speedEl.addEventListener('input', () => {
@@ -4542,6 +4931,7 @@ function refreshSelectedModelBounds(now) {
 function syncModelInspectorTime() {
   const o = selected;
   if (!o || o.type !== 'model' || !o.action) return;
+  if (o.playing !== false && o._rigOpen) syncRigFields(o);
   const timeEl = document.getElementById('f-model-time');
   if (!timeEl || document.activeElement === timeEl) return;
   const dur = o.action.getClip().duration || 1;
@@ -8427,6 +8817,7 @@ function animate() {
   const _mdt = Math.min(_modelClock.getDelta(), 0.1);
   for (const o of objects) if (o.mixer) o.mixer.update(_mdt);
   syncModelInspectorTime();
+  updateRigMarker();
   refreshSelectedModelBounds(performance.now());
   orbit.update();
   updateResizeHandles();
