@@ -823,6 +823,41 @@
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .font-picker-empty{ padding:16px 10px; text-align:center; color:var(--text-2); font-size:12px; }
+
+  /* ---------- Left tabs + Plugins ---------- */
+  .left-tabs{ display:flex; border-bottom:1px solid var(--line); flex-shrink:0; }
+  .left-tab{ flex:1; padding:9px 6px; text-align:center; font-size:10.5px; font-weight:700; letter-spacing:.8px;
+    text-transform:uppercase; color:var(--text-2); cursor:pointer; border-bottom:2px solid transparent; user-select:none; }
+  .left-tab:hover{ color:var(--text-0); }
+  .left-tab.active{ color:var(--accent); border-bottom-color:var(--accent); }
+  #left-scene-tab, #left-plugins-tab{ flex-direction:column; flex:1; min-height:0; }
+  #left-scene-tab{ display:flex; }
+  #left-plugins-tab{ display:none; overflow-y:auto; padding:8px; gap:8px; }
+  .plugin-card{ background:var(--bg-2); border:1px solid var(--line); border-radius:8px; padding:10px; }
+  .plugin-card .pc-head{ display:flex; align-items:center; gap:8px; }
+  .plugin-card .pc-name{ font-size:12px; font-weight:600; color:var(--text-0); flex:1; }
+  .plugin-card .pc-key{ font-family:var(--font-mono); font-size:10px; padding:1px 6px; border:1px solid var(--line); border-radius:4px; color:var(--text-1); }
+  .plugin-card .pc-desc{ font-size:10.5px; line-height:1.5; color:var(--text-2); margin:6px 0 0; }
+  .plugin-card .pc-body{ margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+  .plugin-card .pc-row{ display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--text-1); }
+  .plugin-card .pc-row > span{ width:46px; flex-shrink:0; }
+  .plugin-card input[type=number]{ width:100%; min-width:0; background:var(--bg-1); border:1px solid var(--line); color:var(--text-0);
+    border-radius:5px; padding:4px 5px; font-size:11px; font-family:var(--font-mono); }
+  .plugin-card .pc-seg{ display:flex; flex:1; border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+  .plugin-card .pc-seg div{ flex:1; text-align:center; padding:4px 0; font-size:11px; cursor:pointer; color:var(--text-1); background:var(--bg-1); }
+  .plugin-card .pc-seg div.on{ background:var(--accent-dim); color:var(--accent); font-weight:600; }
+  .plugin-card .pc-btn{ padding:6px; text-align:center; border:1px solid var(--line); border-radius:6px; background:var(--bg-1); color:var(--text-0); font-size:11px; cursor:pointer; }
+  .plugin-card .pc-btn:hover{ border-color:var(--accent); color:var(--accent); }
+  .plugin-switch{ width:28px; height:16px; border-radius:9px; background:var(--bg-3); position:relative; cursor:pointer; flex-shrink:0; transition:background .12s; }
+  .plugin-switch::after{ content:''; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:#fff; transition:left .12s; }
+  .plugin-switch.on{ background:var(--accent); }
+  .plugin-switch.on::after{ left:14px; }
+  #plugin-hud{ position:absolute; left:50%; bottom:18px; transform:translateX(-50%); display:none; align-items:center; gap:10px;
+    background:var(--bg-1); border:1px solid var(--accent); color:var(--text-0); padding:8px 14px; border-radius:10px;
+    font-size:12px; box-shadow:0 6px 24px rgba(0,0,0,.35); z-index:30; white-space:nowrap; }
+  #plugin-hud.show{ display:flex; }
+  #plugin-hud b{ color:var(--accent); }
+  #plugin-hud kbd{ font-family:var(--font-mono); font-size:10.5px; padding:1px 6px; border:1px solid var(--line); border-radius:4px; background:var(--bg-2); }
 </style>
 </head>
 <body>
@@ -1037,6 +1072,11 @@
   </div>
 
   <div id="left">
+    <div class="left-tabs">
+      <div class="left-tab active" data-ltab="scene">Scene</div>
+      <div class="left-tab" data-ltab="plugins">Plugins</div>
+    </div>
+    <div id="left-scene-tab">
     <div class="panel-section">
       <div class="panel-header">Add Mesh</div>
       <button id="newMeshBtn" class="new-mesh-btn">
@@ -1048,6 +1088,8 @@
       <div class="panel-header">Scene Outliner</div>
       <div id="outliner"></div>
     </div>
+    </div>
+    <div id="left-plugins-tab"></div>
   </div>
 
   <!-- CANVAS -->
@@ -1085,6 +1127,7 @@
     <div class="viewport-badge">Perspective</div>
     <div class="axis-gizmo-label">X <span style="color:#e8636b">red</span> · Y <span style="color:#5ec98f">green</span> · Z <span style="color:#5b9dd9">blue</span></div>
     <div class="front-badge" id="front-badge" title="Press F for front view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg><span>FRONT (+Z)</span></div>
+    <div id="plugin-hud"></div>
     <div class="edit-mode-badge" id="edit-mode-badge"><span class="dot"></span><span id="edit-mode-badge-text">EDIT MODE — Vertex</span></div>
     <div class="viewport-hint" id="viewport-hint-object">
       <span><kbd>W</kbd> Move</span>
@@ -3314,9 +3357,40 @@ function refreshInspector() {
       });
     });
   };
-  bindXYZ('pos', o.mesh.position);
   bindXYZ('rot', o.mesh.rotation, true);
-  bindXYZ('scl', o.mesh.scale);
+  // Position / scale on a multi-selection: apply the CHANGE to every selected object (move them
+  // together, scale them around the shared centre) instead of only the primary one.
+  ['pos', 'scl'].forEach(prefix => {
+    ['x', 'y', 'z'].forEach(axis => {
+      const el = document.getElementById(`${prefix}-${axis}`);
+      const mark = withUndoOnce(el);
+      el.addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (isNaN(v)) return;
+        mark();
+        if (selectedSet.size <= 1) { (prefix === 'pos' ? o.mesh.position : o.mesh.scale)[axis] = v; return; }
+        const selObjs = objects.filter(obj => selectedSet.has(obj.id) && obj.mesh);
+        if (prefix === 'pos') {
+          const d = v - o.mesh.position[axis];
+          if (Math.abs(d) < 1e-9) return;
+          selObjs.forEach(obj => { obj.mesh.position[axis] += d; });
+        } else {
+          const cur = o.mesh.scale[axis];
+          if (Math.abs(cur) < 1e-9 || Math.abs(v) < 1e-9) { o.mesh.scale[axis] = v; return; }
+          const ratio = v / cur;
+          const center = new THREE.Vector3();
+          selObjs.forEach(obj => center.add(obj.mesh.position));
+          center.divideScalar(selObjs.length);
+          selObjs.forEach(obj => {
+            obj.mesh.scale[axis] *= ratio;
+            obj.mesh.position[axis] = center[axis] + (obj.mesh.position[axis] - center[axis]) * ratio;
+          });
+        }
+        attachGizmoToSelection();
+        applySelectionOutlines();
+      });
+    });
+  });
 
   // Collision toggle — stored on the object model and later stamped into
   // exported glTF node.extras so a game engine's importer can skip collider
@@ -3325,6 +3399,7 @@ function refreshInspector() {
   if (collisionEl) {
     collisionEl.addEventListener('change', (e) => {
       pushUndo();
+      editTargets().forEach(t => { t.collision = e.target.checked; });
       o.collision = e.target.checked;
       refreshOutliner();
     });
@@ -3334,19 +3409,16 @@ function refreshInspector() {
   // a color change is applied to every selected object's material(s) — including
   // each face of a multi-material object — so the whole selection shares one color
   // instead of only the primary (last-clicked) object updating.
+  // Every object a material edit should hit: the whole multi-selection, or just `o`.
+  const editTargets = () => (selectedSet.size > 1
+    ? objects.filter(x => selectedSet.has(x.id) && x.mesh && x.mesh.material)
+    : [o]);
+  const allMats = () => editTargets().flatMap(x => (Array.isArray(x.mesh.material) ? x.mesh.material : [x.mesh.material]).filter(Boolean));
   function setColor(hexVal, mark) {
     if (mark) mark();
-    const _animTargets = selectedSet.size > 1 ? objects.filter(x => selectedSet.has(x.id) && x.mesh) : [o];
+    const _animTargets = editTargets();
     animMatBeforeEdit(_animTargets);
-    if (selectedSet.size > 1) {
-      objects.forEach(obj => {
-        if (!selectedSet.has(obj.id) || !obj.mesh) return;
-        const ml = Array.isArray(obj.mesh.material) ? obj.mesh.material : [obj.mesh.material];
-        ml.forEach(m => m.color.set(hexVal));
-      });
-    } else {
-      matList.forEach(m => m.color.set(hexVal));
-    }
+    allMats().forEach(m => m.color.set(hexVal));
     document.getElementById('f-color').value = hexVal;
     document.getElementById('f-hex').value = hexVal;
     refreshOutliner();
@@ -3368,7 +3440,7 @@ function refreshInspector() {
   opacityEl.addEventListener('input', (e) => {
     markOpacity();
     const v = parseFloat(e.target.value);
-    matList.forEach(m => {
+    allMats().forEach(m => {
       m.opacity = v;
       m.transparent = v < 0.99 || !!m.map;
       m.depthWrite = v >= 0.99;
@@ -3383,7 +3455,7 @@ function refreshInspector() {
   roughEl.addEventListener('input', (e) => {
     markRough();
     const v = parseFloat(e.target.value);
-    matList.forEach(m => { m.roughness = v; });
+    allMats().forEach(m => { m.roughness = v; });
     document.getElementById('rough-val').textContent = v.toFixed(2);
   });
   const metalEl = document.getElementById('f-metal');
@@ -3391,7 +3463,7 @@ function refreshInspector() {
   metalEl.addEventListener('input', (e) => {
     markMetal();
     const v = parseFloat(e.target.value);
-    matList.forEach(m => { m.metalness = v; });
+    allMats().forEach(m => { m.metalness = v; });
     document.getElementById('metal-val').textContent = v.toFixed(2);
   });
 
@@ -3402,7 +3474,7 @@ function refreshInspector() {
   const markEmissiveColor = withUndoOnce(emissiveColorEl);
   emissiveColorEl.addEventListener('input', (e) => {
     markEmissiveColor();
-    matList.forEach(m => { m.emissive.set(e.target.value); m.needsUpdate = true; });
+    allMats().forEach(m => { m.emissive.set(e.target.value); m.needsUpdate = true; });
   });
   const emissiveEl = document.getElementById('f-emissive');
   const markEmissive = withUndoOnce(emissiveEl);
@@ -3410,10 +3482,12 @@ function refreshInspector() {
     markEmissive();
     const v = parseFloat(e.target.value);
     if (v > 0 && primaryMat.emissive.getHex() === 0x000000) {
-      matList.forEach(m => m.emissive.copy(m.color));
       document.getElementById('f-emissive-color').value = '#' + primaryMat.color.getHexString();
     }
-    matList.forEach(m => { m.emissiveIntensity = v; m.needsUpdate = true; });
+    allMats().forEach(m => {
+      if (v > 0 && m.emissive.getHex() === 0x000000) m.emissive.copy(m.color);
+      m.emissiveIntensity = v; m.needsUpdate = true;
+    });
     document.getElementById('emissive-val').textContent = v.toFixed(2);
   });
 
@@ -3435,38 +3509,44 @@ function refreshInspector() {
     fr.onload = () => {
       new THREE.TextureLoader().load(fr.result, (tex) => {
         try {
-          // Re-resolve the live object: undo/redo rebuilds meshes, so the `o` captured when the
-          // inspector was drawn can be a dead mesh that is no longer in the scene.
-          const live = objects.find(x => x.id === o.id);
-          if (!live) return;
-          const mats = Array.isArray(live.mesh.material) ? live.mesh.material : [live.mesh.material];
+          // Re-resolve the live objects: undo/redo rebuilds meshes, so the `o` captured when the
+          // inspector was drawn can be a dead mesh that is no longer in the scene. With a
+          // multi-selection the image goes on every selected object.
+          const liveList = editTargets().map(t => objects.find(x => x.id === t.id)).filter(Boolean);
+          if (!liveList.length) return;
           tex.colorSpace = THREE.SRGBColorSpace;
           tex.userData.tile = nextImageTile;
           const hasAlpha = prepareAlphaTexture(tex); // must run before clone() so every face inherits the result
           pushUndo();
-          animMatBeforeEdit([live]);
-          const size = new THREE.Box3().setFromObject(live.mesh).getSize(new THREE.Vector3());
-          mats.forEach((m, i) => {
-            const old = m.map;
-            const t = i === 0 ? tex : tex.clone();
-            t.needsUpdate = true;
-            applyTextureModeToTexture(t, { w: size.x || 1, h: size.y || 1 });
-            m.map = t;
-            m.transparent = true;
-            if (hasAlpha) m.color.set('#ffffff');
-            applyAlphaCutout(m, t);
-            m.needsUpdate = true;
-            if (old && old !== t) old.dispose();   // dispose AFTER the swap, never before
+          animMatBeforeEdit(liveList);
+          let first = true;
+          liveList.forEach(live => {
+            const mats = Array.isArray(live.mesh.material) ? live.mesh.material : [live.mesh.material];
+            const size = new THREE.Box3().setFromObject(live.mesh).getSize(new THREE.Vector3());
+            mats.forEach((m) => {
+              const old = m.map;
+              const t = first ? tex : tex.clone();
+              first = false;
+              t.needsUpdate = true;
+              applyTextureModeToTexture(t, { w: size.x || 1, h: size.y || 1 });
+              m.map = t;
+              m.transparent = true;
+              if (hasAlpha) m.color.set('#ffffff');
+              applyAlphaCutout(m, t);
+              m.needsUpdate = true;
+              if (old && old !== t) old.dispose();   // dispose AFTER the swap, never before
+            });
+            syncCutoutShadow(live.mesh);
+            live.faceLabels = null;
           });
-          syncCutoutShadow(live.mesh);
-          live.faceLabels = null;
-          animMatAfterEdit([live]);
+          const live = liveList[0]; const liveAll = liveList;
+          animMatAfterEdit(liveAll);
         } catch (err) {
           console.error('Image replace failed', err);
           showToast('Image replace failed: ' + err.message, true);
         } finally {
           // Always leave gizmo, outline and inspector agreeing with the selection.
-          { const _lv = objects.find(x => x.id === o.id); if (_lv) refreshTiles(_lv); }
+          editTargets().forEach(t => { const _lv = objects.find(x => x.id === t.id); if (_lv) refreshTiles(_lv); });
           if (selectedSet.size === 1 && selected && transformControls.object !== selected.mesh) attachGizmoToSelection();
           applySelectionOutlines();
           refreshInspector();
@@ -3481,32 +3561,37 @@ function refreshInspector() {
     nextImageTile = tileToggle.checked;
     if (!matList.some(m => m.map)) { refreshInspector(); return; } // no image yet: just sets the default for the next upload
     pushUndo();
-    matList.forEach(m => { if (m.map && !m.map.isTextTexture) { m.map.userData.tile = nextImageTile; m.map.userData.tileSize = undefined; } });
-    refreshTiles(o); refreshInspector();
+    allMats().forEach(m => { if (m.map && !m.map.isTextTexture) { m.map.userData.tile = nextImageTile; m.map.userData.tileSize = undefined; } });
+    editTargets().forEach(refreshTiles); refreshInspector();
   });
   function applyTileUV() {
     const u = parseFloat(tileUEl.value), v = parseFloat(tileVEl.value);
     if (!(u > 0) || !(v > 0)) return;
     pushUndo();
-    matList.forEach(m => {
+    allMats().forEach(m => {
       const t = m.map;
       if (t && t.userData.tile && !t.isTextTexture) t.userData.tileSize = { w: u, h: v };
     });
-    refreshTiles(o);
+    editTargets().forEach(refreshTiles);
   }
   tileUEl.addEventListener('change', applyTileUV);
   tileVEl.addEventListener('change', applyTileUV);
   document.getElementById('f-tile-reset').addEventListener('click', () => {
     pushUndo();
-    matList.forEach(m => { if (m.map && m.map.userData.tile && !m.map.isTextTexture) m.map.userData.tileSize = undefined; });
-    refreshTiles(o); refreshInspector();
+    allMats().forEach(m => { if (m.map && m.map.userData.tile && !m.map.isTextTexture) m.map.userData.tileSize = undefined; });
+    editTargets().forEach(refreshTiles); refreshInspector();
   });
   const clearBtn = document.getElementById('f-tex-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => {
     pushUndo();
-    animMatBeforeEdit([o]);
-    if (primaryMat.map) { primaryMat.map.dispose(); primaryMat.map = null; primaryMat.alphaTest = 0; primaryMat.needsUpdate = true; syncCutoutShadow(o.mesh); }
-    animMatAfterEdit([o]);
+    const _clr = editTargets();
+    animMatBeforeEdit(_clr);
+    _clr.forEach(t => {
+      (Array.isArray(t.mesh.material) ? t.mesh.material : [t.mesh.material]).forEach(m => {
+        if (m && m.map && !Array.isArray(t.mesh.material)) { m.map.dispose(); m.map = null; m.alphaTest = 0; m.needsUpdate = true; syncCutoutShadow(t.mesh); }
+      });
+    });
+    animMatAfterEdit(_clr);
     refreshInspector();
   });
 
@@ -3648,6 +3733,218 @@ document.addEventListener('focusin', (e) => {
   if (id && /^(pos|rot|scl)-[xyz]$/.test(id)) lastTransformField = id;
 });
 
+
+// =====================================================================================
+// PLUGINS — left-panel "Plugins" tab. Each plugin is { id, name, key, desc, enabled, render(card) }.
+// =====================================================================================
+const PLUGINS_KEY = 'formwork.plugins.v1';
+const pluginState = { circle: { enabled: true, axis: 'y', cx: 0, cy: 0, cz: 0, count: 0 } };
+try { Object.assign(pluginState.circle, (JSON.parse(localStorage.getItem(PLUGINS_KEY) || 'null') || {}).circle || {}); } catch (err) { /* ignore */ }
+function savePluginState() { try { localStorage.setItem(PLUGINS_KEY, JSON.stringify(pluginState)); } catch (err) { /* ignore */ } }
+
+// ---- Circle Maker ----
+// Press C with a part selected (or being edited): the plugin works out how many copies of that part
+// close a circle edge-to-edge around the axis and shows a ghost preview. Press C again to build it.
+const circlePlugin = { active: false, target: null, plan: null, ghosts: null };
+
+function circleTarget() {
+  if (editMode.active && editMode.obj) return editMode.obj;
+  if (selected && selected.mesh && selected.type !== 'group' && selected.type !== 'model') return selected;
+  return null;
+}
+function circleBasis() {
+  const st = pluginState.circle;
+  const a = new THREE.Vector3(st.axis === 'x' ? 1 : 0, st.axis === 'y' ? 1 : 0, st.axis === 'z' ? 1 : 0);
+  return { a, c: new THREE.Vector3(st.cx || 0, st.cy || 0, st.cz || 0) };
+}
+// Returns { n, R, w, a, cp, r0n, q0, scale, P } or { error }.
+function planCircle(obj) {
+  const st = pluginState.circle;
+  const { a, c } = circleBasis();
+  obj.mesh.updateWorldMatrix(true, false);
+  const P = new THREE.Vector3(), q0 = new THREE.Quaternion(), sc = new THREE.Vector3();
+  obj.mesh.matrixWorld.decompose(P, q0, sc);
+  const cp = c.clone().add(a.clone().multiplyScalar(P.clone().sub(c).dot(a)));   // centre in the part's plane
+  const r0 = P.clone().sub(cp);
+  const R0 = r0.length();
+  if (R0 < 1e-3) return { error: 'The part sits on the circle centre — move it out to where the circle\'s edge should be' };
+  const r0n = r0.clone().divideScalar(R0);
+  const t = new THREE.Vector3().crossVectors(a, r0n).normalize();                 // tangent direction
+  const geo = obj.mesh.geometry;
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  let lo = Infinity, hi = -Infinity;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < 8; i++) {
+    v.set(i & 1 ? bb.max.x : bb.min.x, i & 2 ? bb.max.y : bb.min.y, i & 4 ? bb.max.z : bb.min.z).applyMatrix4(obj.mesh.matrixWorld);
+    const d = v.dot(t); lo = Math.min(lo, d); hi = Math.max(hi, d);
+  }
+  const w = hi - lo;
+  if (!(w > 1e-4)) return { error: 'This part has no width to build a circle from' };
+  let n = st.count > 0 ? Math.round(st.count) : Math.round(Math.PI / Math.atan(w / (2 * R0)));
+  n = Math.max(3, Math.min(360, n));
+  const R = w / (2 * Math.tan(Math.PI / n));                                      // edge-to-edge radius
+  return { n, R, w, a, cp, r0n, q0, scale: sc, P };
+}
+function circleSlot(plan, i) {
+  const ang = (i * 2 * Math.PI) / plan.n;
+  const q = new THREE.Quaternion().setFromAxisAngle(plan.a, ang);
+  const pos = plan.r0n.clone().applyQuaternion(q).multiplyScalar(plan.R).add(plan.cp);
+  const quat = q.clone().multiply(plan.q0);
+  return { pos, quat };
+}
+function clearCircleGhosts() {
+  if (!circlePlugin.ghosts) return;
+  scene.remove(circlePlugin.ghosts);
+  circlePlugin.ghosts.traverse(o => { if (o.material) o.material.dispose(); });
+  circlePlugin.ghosts = null;
+}
+function circleHud(html) {
+  const h = document.getElementById('plugin-hud');
+  if (!h) return;
+  h.innerHTML = html || '';
+  h.classList.toggle('show', !!html);
+}
+function showCirclePreview(obj) {
+  const plan = planCircle(obj);
+  if (plan.error) { cancelCircle(); showToast(plan.error, true); return false; }
+  clearCircleGhosts();
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff8a3d, transparent: true, opacity: 0.35, depthWrite: false });
+  for (let i = 0; i < plan.n; i++) {
+    const { pos, quat } = circleSlot(plan, i);
+    const m = new THREE.Mesh(obj.mesh.geometry, mat);
+    m.position.copy(pos); m.quaternion.copy(quat); m.scale.copy(plan.scale);
+    m.raycast = () => {};
+    g.add(m);
+  }
+  scene.add(g);
+  circlePlugin.ghosts = g; circlePlugin.active = true; circlePlugin.target = obj; circlePlugin.plan = plan;
+  const f = (x) => (Math.round(x * 100) / 100);
+  circleHud(`<span>◯ Circle Maker</span><span><b>${plan.n}</b> parts · radius <b>${f(plan.R)}</b> · part width ${f(plan.w)}</span>` +
+            `<span><kbd>C</kbd> build</span><span><kbd>Esc</kbd> cancel</span>`);
+  return true;
+}
+function cancelCircle() {
+  clearCircleGhosts();
+  circlePlugin.active = false; circlePlugin.target = null; circlePlugin.plan = null;
+  circleHud('');
+}
+function buildCircle(obj) {
+  const plan = planCircle(obj);
+  if (plan.error) { cancelCircle(); showToast(plan.error, true); return; }
+  pushUndo();
+  const base = obj.name;
+  // Slot 0 is the original part (nudged to the exact radius); the other n-1 slots are copies.
+  const first = circleSlot(plan, 0);
+  if (obj.mesh.parent && obj.mesh.parent !== scene) scene.attach(obj.mesh);
+  obj.mesh.position.copy(first.pos);
+  obj.mesh.quaternion.copy(first.quat);
+  const made = [obj];
+  for (let i = 1; i < plan.n; i++) {
+    const { pos, quat } = circleSlot(plan, i);
+    const data = cloneMeshDataFor(obj);
+    data.pos = pos.clone();
+    data.rot = new THREE.Euler().setFromQuaternion(quat, obj.mesh.rotation.order);
+    data.scale = plan.scale.clone();
+    const copy = createObjectFromClone(data, pos);
+    copy.name = `${base}_${i + 1}`;
+    made.push(copy);
+  }
+  cancelCircle();
+  if (editMode.active) exitEditMode();
+  setSelection(made);
+  refreshOutliner(); refreshEmptyState();
+  showToast(`Circle built — ${plan.n} parts, radius ${Math.round(plan.R * 100) / 100}`);
+}
+// Called by the keydown handler. Returns true if the key was consumed.
+function circleKeyHandler(e) {
+  if (!pluginState.circle.enabled) return false;
+  if (e.key === 'Escape' && circlePlugin.active) { cancelCircle(); return true; }
+  if (e.key !== 'c' && e.key !== 'C') return false;
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  const obj = circleTarget();
+  if (!obj) { showToast('Circle Maker: select a part first', true); return true; }
+  if (circlePlugin.active && circlePlugin.target === obj) buildCircle(obj);
+  else showCirclePreview(obj);
+  return true;
+}
+// Keep the preview honest if the part is moved/resized or settings change while it is showing.
+function refreshCirclePreview() {
+  if (!circlePlugin.active) return;
+  const obj = circlePlugin.target;
+  if (!obj || !objects.includes(obj) || !circleTarget() || circleTarget() !== obj) { cancelCircle(); return; }
+  showCirclePreview(obj);
+}
+window.addEventListener('pointerup', () => { if (circlePlugin.active) setTimeout(refreshCirclePreview, 0); });
+document.addEventListener('input', (e) => { if (circlePlugin.active && !e.target.closest('#left-plugins-tab')) setTimeout(refreshCirclePreview, 0); });
+
+// ---- Plugin registry + tab UI ----
+const PLUGINS = [
+  {
+    id: 'circle', name: 'Circle Maker', key: 'C',
+    desc: 'Select a part (or edit one) and press C. It works out how many copies close a circle edge-to-edge and shows a preview. Press C again to build it. The part\'s distance from the centre sets the size.',
+    render(body) {
+      const st = pluginState.circle;
+      body.innerHTML = `
+        <div class="pc-row"><span>Axis</span><div class="pc-seg" id="cm-axis">
+          ${['x','y','z'].map(a => `<div data-a="${a}" class="${st.axis === a ? 'on' : ''}">${a.toUpperCase()}</div>`).join('')}</div></div>
+        <div class="pc-row"><span>Centre</span>
+          <input type="number" step="0.5" id="cm-cx" value="${st.cx}" title="Centre X">
+          <input type="number" step="0.5" id="cm-cy" value="${st.cy}" title="Centre Y">
+          <input type="number" step="0.5" id="cm-cz" value="${st.cz}" title="Centre Z"></div>
+        <div class="pc-row"><span>Parts</span><input type="number" min="0" max="360" step="1" id="cm-count" value="${st.count}" title="0 = calculate automatically"></div>
+        <div class="pc-desc" style="margin:0">Parts: 0 = auto. Axis is the line the circle wraps around (Y = flat ring).</div>
+        <div class="pc-btn" id="cm-go">Preview with selected part</div>`;
+      const sync = () => { savePluginState(); refreshCirclePreview(); };
+      body.querySelectorAll('#cm-axis div').forEach(d => d.addEventListener('click', () => {
+        st.axis = d.dataset.a;
+        body.querySelectorAll('#cm-axis div').forEach(x => x.classList.toggle('on', x === d));
+        sync();
+      }));
+      [['cx','cm-cx'],['cy','cm-cy'],['cz','cm-cz']].forEach(([k, id]) =>
+        body.querySelector('#' + id).addEventListener('change', (e) => { st[k] = parseFloat(e.target.value) || 0; sync(); }));
+      body.querySelector('#cm-count').addEventListener('change', (e) => { st.count = Math.max(0, Math.min(360, Math.round(parseFloat(e.target.value) || 0))); sync(); });
+      body.querySelector('#cm-go').addEventListener('click', () => {
+        const obj = circleTarget();
+        if (!obj) { showToast('Circle Maker: select a part first', true); return; }
+        showCirclePreview(obj);
+      });
+    }
+  }
+];
+function renderPluginsTab() {
+  const tab = document.getElementById('left-plugins-tab');
+  if (!tab) return;
+  tab.innerHTML = '';
+  PLUGINS.forEach(p => {
+    const st = pluginState[p.id];
+    const card = document.createElement('div');
+    card.className = 'plugin-card';
+    card.innerHTML = `<div class="pc-head"><div class="pc-name">${p.name}</div><div class="pc-key">${p.key}</div>
+      <div class="plugin-switch ${st.enabled ? 'on' : ''}" title="Enable / disable"></div></div>
+      <div class="pc-desc">${p.desc}</div><div class="pc-body"></div>`;
+    const body = card.querySelector('.pc-body');
+    const sw = card.querySelector('.plugin-switch');
+    const paint = () => { body.style.display = st.enabled ? 'flex' : 'none'; sw.classList.toggle('on', st.enabled); };
+    sw.addEventListener('click', () => {
+      st.enabled = !st.enabled; savePluginState();
+      if (!st.enabled && p.id === 'circle') cancelCircle();
+      paint();
+    });
+    p.render(body);
+    paint();
+    tab.appendChild(card);
+  });
+}
+document.querySelectorAll('.left-tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.left-tab').forEach(x => x.classList.toggle('active', x === t));
+  const plug = t.dataset.ltab === 'plugins';
+  document.getElementById('left-scene-tab').style.display = plug ? 'none' : 'flex';
+  document.getElementById('left-plugins-tab').style.display = plug ? 'flex' : 'none';
+}));
+renderPluginsTab();
+
 // Keyboard shortcuts
 window.addEventListener('keydown', (e) => {
   const ae = document.activeElement;
@@ -3689,6 +3986,8 @@ window.addEventListener('keydown', (e) => {
       return;
     }
   }
+
+  if (circleKeyHandler(e)) { e.preventDefault(); return; }
 
   if (e.key === 'Tab') { e.preventDefault(); toggleEditMode(); return; }
 
@@ -4342,12 +4641,19 @@ function breakModelIntoMeshes(o) {
   pushUndo();
   const frozen = SkeletonUtils.clone(o.mesh); // clone keeps the pose the model is in right now
   frozen.updateMatrixWorld(true);
-  const made = importAsEditableMeshes(frozen, o.name, null, { skipUndo: true });
+  // Carry the model's own clips (edited ones included) over: they get baked into editor keyframes
+  // on the new mesh objects so they show up in Animation Mode instead of being thrown away.
+  let srcClips = [];
+  try { srcClips = (modelClipsFor(o) || []).filter(c => c && c.tracks && c.tracks.length); } catch (e) { srcClips = []; }
+  const clipsBefore = anim.clips.length;
+  const made = importAsEditableMeshes(frozen, o.name, srcClips.length ? srcClips : null, { skipUndo: true });
   if (!made.length) return;
   deleteObject(o);
   setSelection(made);
   refreshOutliner(); refreshEmptyState();
-  showToast(`Split "${o.name}" into ${made.length} editable mesh${made.length !== 1 ? 'es' : ''}`);
+  const animated = made.filter(m => m.animClips && Object.values(m.animClips).some(t => t.pos && t.pos.length)).length;
+  showToast(`Split "${o.name}" into ${made.length} editable mesh${made.length !== 1 ? 'es' : ''}` +
+    (animated ? ` — ${animated} animated, ${srcClips.length} clip${srcClips.length !== 1 ? 's' : ''} in Animation Mode` : (srcClips.length ? ' — clips only move skinned bones, nothing to bake' : '')));
 }
 
 // ==================================================================
@@ -4990,6 +5296,8 @@ function bakeImportedAnimations(root, clips, meshNodes, objs) {
   const ancestorNames = meshNodes.map(m => {
     const set = new Set();
     for (let n = m; n; n = n.parent) set.add(nodeLabel(n));
+    // Skinned meshes are driven by their bones, which are usually NOT ancestors of the mesh node.
+    if (m.isSkinnedMesh && m.skeleton) m.skeleton.bones.forEach(b => set.add(nodeLabel(b)));
     return set;
   });
 
@@ -5046,6 +5354,19 @@ function bakeImportedAnimations(root, clips, meshNodes, objs) {
         j.node.matrixWorld.decompose(pos, quat, scl);
         // The editor object's origin sits at its geometry's centre, not at the glTF node's origin.
         if (j.obj.__importCenter) pos.copy(j.obj.__importCenter).applyMatrix4(j.node.matrixWorld);
+        // Skinned mesh: follow the deformed bounding-box centre so the part tracks its bones.
+        if (j.node.isSkinnedMesh && j.node.skeleton) {
+          const g = j.node.geometry, pa = g.attributes.position;
+          const stride = Math.max(1, Math.floor(pa.count / 400));
+          const bb = new THREE.Box3(), v = new THREE.Vector3();
+          j.node.skeleton.update();
+          for (let k = 0; k < pa.count; k += stride) {
+            v.fromBufferAttribute(pa, k);
+            j.node.applyBoneTransform(k, v);
+            bb.expandByPoint(v);
+          }
+          if (!bb.isEmpty()) pos.copy(bb.getCenter(v)).applyMatrix4(j.node.matrixWorld);
+        }
         const tr = j.obj.animClips[id];
         tr.pos.push({ t, x: pos.x, y: pos.y, z: pos.z, ease: 'linear' });
         tr.rot.push({ t, x: quat.x, y: quat.y, z: quat.z, w: quat.w, ease: 'linear' });
