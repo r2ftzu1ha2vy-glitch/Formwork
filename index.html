@@ -1782,6 +1782,7 @@ applyGizmoTheme(); syncGizmoUI();
 
 // ---------------- STATE ----------------
 let objects = [];      // {id, mesh, name, type, outline}
+let _uiDefer = 0, _uiDirty = false;   // bulk-operation batching (see beginBatch/endBatch)
 let selected = null;   // primary selection (drives inspector + gizmo)
 let selectedSet = new Set(); // ids of all selected objects (multi-select)
 let idCounter = 1;
@@ -1812,9 +1813,18 @@ function disposeMaterial(mat) {
 // blob: URL. Drawing the image to a canvas and reading it back as a data URL
 // works uniformly for <img>, ImageBitmap, and canvas sources, and the result
 // is self-contained — safe to embed directly in the saved project JSON.
+const _texUrlCache = new WeakMap();
 function textureToDataURL(tex) {
   const img = tex?.image;
   if (!img || !(img.width || img.videoWidth)) return null;
+  const hit = _texUrlCache.get(tex);
+  if (hit && hit.img === img && hit.version === tex.version) return hit.url;
+  const url = _textureToDataURLRaw(tex);
+  _texUrlCache.set(tex, { img, version: tex.version, url });
+  return url;
+}
+function _textureToDataURLRaw(tex) {
+  const img = tex?.image;
   try {
     const w = img.width || img.videoWidth;
     const h = img.height || img.videoHeight;
@@ -1901,6 +1911,14 @@ function syncCutoutShadow(mesh) {
   }
 }
 
+// ---- Batching: bulk operations (duplicate / paste / circle) call beginBatch()/endBatch() so the
+// outliner + stats are rebuilt ONCE at the end instead of after every single object. ----
+function beginBatch() { _uiDefer++; }
+function endBatch() {
+  if (_uiDefer > 0) _uiDefer--;
+  if (_uiDefer === 0 && _uiDirty) { _uiDirty = false; refreshOutliner(); refreshEmptyState(); }
+}
+
 // Full-scene snapshot for undo/redo (handles add/delete/import, not just transform edits)
 function snapshotScene() {
   // Groups have no geometry/material to serialize. Rather than crash or silently
@@ -1917,6 +1935,17 @@ function snapshotScene() {
     if (o.__groupParentId) return []; // member already captured above via its group
     return [snapshotOneObject(o, false)];
   });
+}
+
+const _geoJsonCache = new WeakMap();
+function geometryJSONCached(g) {
+  const p = g.attributes && g.attributes.position, uv = g.attributes && g.attributes.uv, ix = g.index;
+  const sig = [p ? p.version : 0, p ? p.count : 0, uv ? uv.version : 0, ix ? ix.count : 0, ix ? ix.version : 0, g.groups.length].join('|');
+  const hit = _geoJsonCache.get(g);
+  if (hit && hit.sig === sig) return hit.json;
+  const json = g.toJSON();
+  _geoJsonCache.set(g, { sig, json });
+  return json;
 }
 
 function snapshotOneObject(o, useWorldTransform) {
@@ -1941,7 +1970,7 @@ function snapshotOneObject(o, useWorldTransform) {
       name: o.name,
       type: o.type,
       collision: o.collision !== false,
-      geomJSON: o.mesh.geometry.toJSON(),
+      geomJSON: geometryJSONCached(o.mesh.geometry),
       pos, rot, scale,
       color: '#' + primary.color.getHexString(),
       rough: primary.roughness,
@@ -2348,7 +2377,7 @@ function cloneMeshDataFor(obj) {
 }
 
 function createObjectFromClone(data, posOverride) {
-  const geo = data.geometry ? data.geometry.clone() : new THREE.BufferGeometry();
+  const geo = data.geometry ? (data.__ownGeo ? data.geometry : data.geometry.clone()) : new THREE.BufferGeometry();
   if (data.geometry && data.uvOrig !== undefined) uvOrig.set(geo, data.uvOrig);
   if (!geo.attributes.position || geo.attributes.position.count === 0) {
     console.warn('Duplicated geometry had no position data — falling back to a unit box so the copy stays visible');
@@ -2404,7 +2433,7 @@ function createObjectFromClone(data, posOverride) {
   scene.add(mesh);
 
   const id = idCounter++;
-  const count = objects.filter(o => o.type === data.type).length;
+  const count = data.name ? 0 : objects.filter(o => o.type === data.type).length;
   const obj = { id, mesh, name: data.name ? data.name + ' copy' : `${typeLabel[data.type]}${count>0?'.'+String(count).padStart(3,'0'):''}`, type: data.type, faceLabels: data.faceLabels ? { ...data.faceLabels } : undefined, collision: data.collision !== false };
   objects.push(obj);
   refreshOutliner();
@@ -2414,6 +2443,7 @@ function createObjectFromClone(data, posOverride) {
 
 function duplicateObject(obj) {
   const data = cloneMeshDataFor(obj);
+  data.__ownGeo = true;   // cloneMeshDataFor already cloned the geometry — don't clone it a second time
   // obj.mesh.position/rotation/scale are LOCAL — for a plain top-level object that's
   // also its world transform, but for a group member (reparented under the group's
   // THREE.Group via attach()) it's relative to the group, not the scene. Using it
@@ -2473,13 +2503,18 @@ function duplicateGroup(groupObj) {
 function duplicateSelected() {
   if (selectedSet.size === 0) return;
   pushUndo();
+  const byId = new Map(objects.map(o => [o.id, o]));      // O(1) lookups instead of objects.find per id
   const ids = [...selectedSet];
-  const newObjs = ids.map(id => {
-    const obj = objects.find(o => o.id === id);
-    if (!obj) return null;
-    if (obj.type === 'model') return duplicateModel(obj);
-    return obj.type === 'group' ? duplicateGroup(obj) : duplicateObject(obj);
-  }).filter(Boolean);
+  let newObjs = [];
+  beginBatch();
+  try {
+    newObjs = ids.map(id => {
+      const obj = byId.get(id);
+      if (!obj) return null;
+      if (obj.type === 'model') return duplicateModel(obj);
+      return obj.type === 'group' ? duplicateGroup(obj) : duplicateObject(obj);
+    }).filter(Boolean);
+  } finally { endBatch(); }
   setSelection(newObjs);
 }
 
@@ -2513,6 +2548,10 @@ function copySelected() {
 
 function pasteClipboard() {
   if (clipboard.length === 0) return;
+  beginBatch();
+  try { _pasteClipboardInner(); } finally { endBatch(); }
+}
+function _pasteClipboardInner() {
   pushUndo();
   const offset = pasteOffset();
   const newTopLevel = [];
@@ -2638,28 +2677,81 @@ function selectModeFromEvent(e) {
 // directly to fake a glow-on-select effect, which meant deselecting an object silently
 // reset its emissive to black — wiping out any real neon glow color the user picked in
 // the inspector. Outline helpers keep selection state fully independent of material data.
-const selectionOutlines = new Map(); // object id -> THREE.BoxHelper
+const selectionOutlines = new Map(); // object id -> THREE.BoxHelper  ('__combined' -> one box for a big selection)
+const OUTLINE_PER_OBJECT_LIMIT = 80;  // beyond this, one box around the whole selection is drawn instead
+function _disposeHelper(helper) { scene.remove(helper); if (helper.geometry) helper.geometry.dispose(); if (helper.material) helper.material.dispose(); }
 function applySelectionOutlines() {
-  const selIds = new Set(selectedSet);
-  // Remove outlines for objects no longer selected (or deleted)
+  const selIds = selectedSet;
+  const big = selIds.size > OUTLINE_PER_OBJECT_LIMIT;
+  const live = new Set(objects.map(o => o.id));
   for (const [id, helper] of selectionOutlines) {
-    if (!selIds.has(id) || !objects.find(o => o.id === id)) {
-      scene.remove(helper);
-      helper.geometry.dispose();
-      helper.material.dispose();
+    const keepCombined = id === '__combined' && big;
+    if (!keepCombined && (id === '__combined' || big || !selIds.has(id) || !live.has(id))) {
+      _disposeHelper(helper);
       selectionOutlines.delete(id);
     }
   }
-  // Add outlines for newly selected objects
+  if (big) {
+    if (!selectionOutlines.has('__combined')) {
+      const helper = new THREE.Box3Helper(new THREE.Box3(), 0xff8a3d);
+      helper.material.depthTest = false;
+      helper.material.transparent = true;
+      helper.material.opacity = 0.9;
+      helper.userData.combined = true;
+      scene.add(helper);
+      selectionOutlines.set('__combined', helper);
+    }
+    updateSelectionOutlines(true);
+    return;
+  }
   objects.forEach(o => {
     if (selIds.has(o.id) && !selectionOutlines.has(o.id)) {
       const helper = new THREE.BoxHelper(o.mesh, 0xff8a3d);
       helper.material.depthTest = false;
       helper.material.transparent = true;
       helper.material.opacity = 0.9;
+      helper.userData.always = (o.type === 'model');   // skeletal animation changes bounds without moving the node
       scene.add(helper);
       selectionOutlines.set(o.id, helper);
     }
+  });
+}
+// Per-frame: only touch a helper when its object's matrix / geometry actually changed.
+const _outlineBox = new THREE.Box3();
+function updateSelectionOutlines(force) {
+  if (selectionOutlines.size === 0) return;
+  const comb = selectionOutlines.get('__combined');
+  if (comb) {
+    const meshes = [];
+    let sig = 0;
+    for (const o of objects) {
+      if (!selectedSet.has(o.id) || !o.mesh) continue;
+      meshes.push(o.mesh);
+      const e = o.mesh.matrixWorld.elements;
+      sig += e[12] * 1.31 + e[13] * 1.73 + e[14] * 2.11 + e[0] + e[5] + e[10] + e[1] * 0.7 + e[4] * 0.9;
+      const pa = o.mesh.geometry && o.mesh.geometry.attributes && o.mesh.geometry.attributes.position;
+      if (pa) sig += pa.version * 0.013;
+    }
+    if (force || comb.userData.sig !== sig) {
+      comb.userData.sig = sig;
+      comb.box.makeEmpty();
+      meshes.forEach(m => { _outlineBox.setFromObject(m); if (!_outlineBox.isEmpty()) comb.box.union(_outlineBox); });
+      if (comb.box.isEmpty()) comb.box.set(new THREE.Vector3(), new THREE.Vector3());
+    }
+    return;
+  }
+  selectionOutlines.forEach(helper => {
+    const m = helper.object;
+    if (!m) return;
+    const e = m.matrixWorld.elements;
+    const pa = m.geometry && m.geometry.attributes && m.geometry.attributes.position;
+    const ver = pa ? pa.version : 0;
+    let c = helper.userData.mw;
+    let changed = force || helper.userData.always || !c || c.ver !== ver || c.gid !== (m.geometry && m.geometry.uuid);
+    if (!changed) { for (let i = 0; i < 16; i++) if (c.e[i] !== e[i]) { changed = true; break; } }
+    if (!changed) return;
+    helper.update();
+    helper.userData.mw = { e: Float64Array.from(e), ver, gid: m.geometry && m.geometry.uuid };
   });
 }
 function removeSelectionOutlineFor(id) {
@@ -2967,12 +3059,29 @@ const iconFor = (type) => {
   return icons[type] || icons.box;
 };
 
+// Rename the whole selection when the edited object is part of a multi-selection: every selected
+// object gets the typed name plus a running number (Wall_1, Wall_2 ...), in outliner order.
+function renameSelection(o, value) {
+  const v = (value || '').trim();
+  if (!v) return;
+  if (selectedSet.size > 1 && selectedSet.has(o.id)) {
+    const targets = objects.filter(x => selectedSet.has(x.id));
+    targets.forEach((x, i) => { x.name = `${v}_${i + 1}`; });
+  } else {
+    o.name = v;
+  }
+  refreshOutliner();
+  if (selectedSet.size > 1) refreshInspector();
+}
+
 function refreshOutliner() {
+  if (_uiDefer) { _uiDirty = true; return; }
   if (objects.length === 0) {
     outlinerEl.innerHTML = `<div class="empty-hint">No objects yet.<br>Add a mesh from the panel above.</div>`;
     return;
   }
   outlinerEl.innerHTML = '';
+  const _olHost = document.createDocumentFragment();
 
   function makeRow(obj, indent) {
     const row = document.createElement('div');
@@ -2998,7 +3107,7 @@ function refreshOutliner() {
       row.querySelectorAll('svg:not(.disclosure), .name').forEach(el =>
         el.addEventListener('click', (e) => selectObject(obj, selectModeFromEvent(e)))
       );
-      outlinerEl.appendChild(row);
+      _olHost.appendChild(row);
       return;
     }
 
@@ -3011,7 +3120,7 @@ function refreshOutliner() {
         ${obj.collision === false ? '<span style="font-size:9px; color:var(--text-2); border:1px solid var(--line); border-radius:3px; padding:1px 4px; margin-right:4px; flex-shrink:0;" title="No collision — player passes through in-game">NC</span>' : ''}
       `;
       row.querySelectorAll('svg, .name').forEach(el => el.addEventListener('click', (e) => selectObject(obj, selectModeFromEvent(e))));
-      outlinerEl.appendChild(row);
+      _olHost.appendChild(row);
       return;
     }
 
@@ -3036,7 +3145,7 @@ function refreshOutliner() {
       pushUndo();
       toggleObjectGhost(obj);
     });
-    outlinerEl.appendChild(row);
+    _olHost.appendChild(row);
   }
 
   // Top-level pass: skip anything currently parented under a group (__groupParentId set) —
@@ -3050,6 +3159,7 @@ function refreshOutliner() {
       objects.filter(o => memberIds.has(o.id)).forEach(child => makeRow(child, 18));
     }
   });
+  outlinerEl.appendChild(_olHost);
 }
 
 // Quick toggle between full opacity and a low "ghost" opacity (default 12%) from the
@@ -3072,6 +3182,7 @@ function toggleObjectGhost(obj) {
 }
 
 function refreshEmptyState() {
+  if (_uiDefer) { _uiDirty = true; return; }
   document.getElementById('empty-state').style.display = objects.length === 0 ? 'flex' : 'none';
   updateStats();
 }
@@ -3151,7 +3262,7 @@ function refreshInspector() {
 
         <button id="f-ungroup" style="width:100%; margin-top:12px; padding:8px; background:var(--bg-2); border:1px solid var(--border); border-radius:6px; color:var(--text-0); cursor:pointer;">Ungroup (Ctrl+Shift+G)</button>
       </div>`;
-    document.getElementById('f-name').addEventListener('change', (e) => { pushUndo(); o.name = e.target.value || o.name; refreshOutliner(); });
+    document.getElementById('f-name').addEventListener('change', (e) => { pushUndo(); renameSelection(o, e.target.value); });
     document.getElementById('f-delete').addEventListener('click', () => { pushUndo(); deleteObject(o); selected=null; selectedSet.clear(); transformControls.detach(); refreshOutliner(); refreshInspector(); refreshEmptyState(); });
     document.getElementById('f-ungroup').addEventListener('click', () => ungroupObject(o));
     ['x','y','z'].forEach(ax => {
@@ -3307,8 +3418,8 @@ function refreshInspector() {
   const markName = withUndoOnce(nameEl);
   nameEl.addEventListener('change', (e) => {
     markName();
-    o.name = e.target.value || o.name;
-    refreshOutliner();
+    renameSelection(o, e.target.value);
+    e.target.value = o.name;
   });
   // Delete
   document.getElementById('f-delete').addEventListener('click', () => { setSelection([o]); deleteSelected(); });
@@ -3841,9 +3952,11 @@ function buildCircle(obj) {
   obj.mesh.position.copy(first.pos);
   obj.mesh.quaternion.copy(first.quat);
   const made = [obj];
+  beginBatch();
   for (let i = 1; i < plan.n; i++) {
     const { pos, quat } = circleSlot(plan, i);
     const data = cloneMeshDataFor(obj);
+    data.__ownGeo = true;
     data.pos = pos.clone();
     data.rot = new THREE.Euler().setFromQuaternion(quat, obj.mesh.rotation.order);
     data.scale = plan.scale.clone();
@@ -3851,6 +3964,7 @@ function buildCircle(obj) {
     copy.name = `${base}_${i + 1}`;
     made.push(copy);
   }
+  endBatch();
   cancelCircle();
   if (editMode.active) exitEditMode();
   setSelection(made);
@@ -5099,7 +5213,7 @@ function renderModelInspector(o) {
       <button id="f-model-break" style="${btnCss}" title="Replace this model with separate editable meshes in its current pose (colour, texture and edit-mode tools work on them; rig and PBR maps are lost)">Break into editable meshes</button>
     </div>`;
 
-  document.getElementById('f-name').addEventListener('change', (e) => { pushUndo(); o.name = e.target.value || o.name; refreshOutliner(); });
+  document.getElementById('f-name').addEventListener('change', (e) => { pushUndo(); renameSelection(o, e.target.value); });
   document.getElementById('f-delete').addEventListener('click', () => { pushUndo(); deleteObject(o); selected = null; selectedSet.clear(); transformControls.detach(); refreshOutliner(); refreshInspector(); refreshEmptyState(); });
   ['x', 'y', 'z'].forEach(ax => {
     document.getElementById(`pos-${ax}`).addEventListener('change', (e) => { pushUndo(); o.mesh.position[ax] = parseFloat(e.target.value) || 0; });
@@ -7878,7 +7992,7 @@ function applyAnimAtTime(t) {
     }
     if (tr.mat && tr.mat.length) applyMatState(o, sampleMat(tr.mat, t));
   });
-  selectionOutlines.forEach(helper => helper.update());
+  updateSelectionOutlines(true);
 }
 
 function sampleVecTrack(keys, t) {
@@ -9170,7 +9284,7 @@ function animate() {
   if (document.body.classList.contains('cinema')) cinemaHideHelpers();
   updateTiledTextures();
   if (scaleSizePanelVisible()) updateScaleSizePanel();
-  selectionOutlines.forEach(helper => helper.update());
+  updateSelectionOutlines();
 
   if (anim.active && anim.playing) {
     const now = performance.now();
