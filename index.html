@@ -3371,20 +3371,10 @@ function refreshInspector() {
           <button class="btn" id="f-tile-reset" title="Reset to the image's native aspect ratio" style="padding:6px 8px;">Reset</button>
         </div>
       </div>
-      ${o.type === 'box' ? `
-      <div class="field-label">Images per face</div>
-      <div class="color-row" style="gap:6px;">
-        <select id="f-face-img-face" title="Which face gets the image. If you pick several files, they fill the following faces in order." style="flex:1; min-width:0; padding:6px; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; color:var(--text-0);">
-          ${FACE_ORDER.map(f => `<option value="${f}">${FACE_LABEL[f]}${(Array.isArray(o.mesh.material) && o.mesh.material[FACE_ORDER.indexOf(f)] && o.mesh.material[FACE_ORDER.indexOf(f)].map && !o.mesh.material[FACE_ORDER.indexOf(f)].map.isTextTexture) ? ' \u25CF' : ''}</option>`).join('')}
-        </select>
-        <button class="btn" id="f-face-img-add" title="Add an image to the chosen face (select several files to fill consecutive faces)" style="justify-content:center;">Add image</button>
-      </div>
-      ${Array.isArray(o.mesh.material) && o.mesh.material.some(m => m.map && !m.map.isTextTexture) ? `
-        <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
-          ${FACE_ORDER.map((f, i) => { const m = o.mesh.material[i]; return (m && m.map && !m.map.isTextTexture) ? `<span class="f-face-img-chip" data-face="${f}" title="Remove the image on ${FACE_LABEL[f]}" style="cursor:pointer; font-size:10.5px; padding:3px 7px; border:1px solid var(--line); border-radius:10px; background:var(--bg-2); color:var(--text-1);">${FACE_LABEL[f]} \u2715</span>` : ''; }).join('')}
-        </div>` : ''}
-      <input type="file" id="f-face-img-input" accept="image/*" multiple style="display:none">
-      ` : ''}
+      <button class="btn" id="f-tex-compose" title="Build a custom texture from several images: position, scale, rotate and layer them" style="width:100%; justify-content:center; margin-top:6px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="13" height="13" rx="2"/><rect x="8" y="8" width="13" height="13" rx="2"/></svg>
+        Compose texture (multiple images)
+      </button>
       <input type="file" id="f-tex-input" accept="image/*" style="display:none">
 
       <div class="field-label">Collision</div>
@@ -3720,96 +3710,7 @@ function refreshInspector() {
     refreshInspector();
   });
 
-  // ---- Multiple images on one object: one image per box face ----
-  const faceImgSel = document.getElementById('f-face-img-face');
-  const faceImgInp = document.getElementById('f-face-img-input');
-  if (faceImgSel && faceImgInp) {
-    document.getElementById('f-face-img-add').addEventListener('click', () => {
-      endResizeDrag();
-      faceImgInp.value = '';
-      faceImgInp.click();
-    });
-    const readAsDataURL = (file) => new Promise((res, rej) => {
-      const fr = new FileReader();
-      fr.onload = () => res(fr.result);
-      fr.onerror = () => rej(new Error('Could not read ' + file.name));
-      fr.readAsDataURL(file);
-    });
-    const loadTexture = (url, name) => new Promise((res, rej) => {
-      new THREE.TextureLoader().load(url, res, undefined, () => rej(new Error('Could not load ' + name)));
-    });
-    faceImgInp.addEventListener('change', async (e) => {
-      const files = Array.from(e.target.files || []).slice(0, FACE_ORDER.length);
-      e.target.value = '';
-      if (!files.length) return;
-      const startIdx = Math.max(0, FACE_ORDER.indexOf(faceImgSel.value));
-      let live = null;
-      try {
-        const textures = [];
-        for (const f of files) textures.push(await loadTexture(await readAsDataURL(f), f.name));
-        // Re-resolve after the async loads: undo/redo may have rebuilt the mesh meanwhile.
-        live = objects.find(x => x.id === o.id);
-        if (!live || live.type !== 'box') return;
-        pushUndo();
-        animMatBeforeEdit([live]);
-        const mats = ensureFaceMaterials(live);
-        textures.forEach((tex, k) => {
-          const idx = (startIdx + k) % FACE_ORDER.length;
-          const face = FACE_ORDER[idx];
-          const m = mats[idx];
-          tex.colorSpace = THREE.SRGBColorSpace;
-          tex.userData.tile = nextImageTile;
-          const hasAlpha = prepareAlphaTexture(tex);
-          applyTextureModeToTexture(tex);
-          tex.needsUpdate = true;
-          const old = m.map;
-          m.map = tex;
-          m.transparent = true;
-          if (hasAlpha) m.color.set('#ffffff');
-          applyAlphaCutout(m, tex);
-          m.needsUpdate = true;
-          // Only free the old texture if no other face is still using it (whole-object skins share one).
-          if (old && old !== tex && !mats.some((x, j) => j !== idx && x.map === old)) old.dispose();
-          if (live.faceLabels) {               // an image replaces any text label on that face
-            delete live.faceLabels[face];
-            if (Object.keys(live.faceLabels).length === 0) live.faceLabels = null;
-          }
-        });
-        syncCutoutShadow(live.mesh);
-        animMatAfterEdit([live]);
-        if (files.length > 1) showToast(`Added ${files.length} images`);
-      } catch (err) {
-        console.error('Face image failed', err);
-        showToast('Image failed: ' + err.message, true);
-      } finally {
-        if (live) refreshTiles(live);
-        if (selectedSet.size === 1 && selected && transformControls.object !== selected.mesh) attachGizmoToSelection();
-        applySelectionOutlines();
-        refreshInspector();
-      }
-    });
-    document.querySelectorAll('.f-face-img-chip').forEach(chip => {
-      chip.addEventListener('click', () => {
-        const live = objects.find(x => x.id === o.id);
-        if (!live || !Array.isArray(live.mesh.material)) return;
-        const idx = FACE_ORDER.indexOf(chip.dataset.face);
-        pushUndo();
-        animMatBeforeEdit([live]);
-        const m = live.mesh.material[idx];
-        const shared = live.mesh.material.some((x, j) => j !== idx && x.map === m.map);
-        if (shared) m.map = null; else removeFaceTexture(live, chip.dataset.face);
-        m.alphaTest = 0;
-        m.transparent = m.opacity < 0.99;
-        m.depthWrite = m.opacity >= 0.99;
-        m.needsUpdate = true;
-        syncCutoutShadow(live.mesh);
-        animMatAfterEdit([live]);
-        refreshTiles(live);
-        refreshInspector();
-      });
-    });
-  }
-
+  document.getElementById('f-tex-compose').addEventListener('click', () => { endResizeDrag(); showTextureComposer(o); });
   document.getElementById('f-text-face').addEventListener('click', () => showTextFaceModal(o));
 }
 
@@ -6253,6 +6154,291 @@ function removeFaceTexture(obj, face) {
     delete obj.faceLabels[face];
     if (Object.keys(obj.faceLabels).length === 0) obj.faceLabels = null;
   }
+}
+
+// ---------------- TEXTURE COMPOSER (multiple images -> one custom texture) ----------------
+// Layers several images on one canvas (move / scale / rotate / opacity / order), then bakes the
+// result into a single texture on the whole object or on one face of a box. The baked texture is
+// what gets saved with the project; the layer list itself lives only for the current session.
+const composerState = new WeakMap(); // object -> { layers, bg, bgOn, target } so re-opening keeps your layers
+
+function showTextureComposer(obj) {
+  const old = document.getElementById('tex-composer-modal');
+  if (old) old.remove();
+
+  const isBox = obj.type === 'box';
+  const st = composerState.get(obj) || { layers: [], bg: '#ffffff', bgOn: true, target: 'all' };
+  composerState.set(obj, st);
+  if (!isBox) st.target = 'all';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'tex-composer-modal';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; z-index:200;';
+  const inp = 'padding:6px; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; color:var(--text-0); font-size:12px;';
+  overlay.innerHTML = `
+    <div class="modal" style="width:860px; max-width:96vw; max-height:92vh; overflow:auto; background:var(--bg-1); border:1px solid var(--line); border-radius:12px; padding:18px;">
+      <h3 style="font-size:15px; margin-bottom:2px;">Compose texture</h3>
+      <p style="font-size:12px; color:var(--text-1); margin-bottom:12px;">Add as many images as you like, arrange them, then apply to <b style="color:var(--text-0)">${obj.name}</b>. Drag on the preview to move, mouse wheel to scale.</p>
+      <div style="display:flex; gap:16px; flex-wrap:wrap;">
+        <div style="flex:1 1 420px; min-width:300px;">
+          <div id="tc-stage" style="background:repeating-conic-gradient(#8884 0% 25%, transparent 0% 50%) 50% / 16px 16px; border:1px solid var(--line); border-radius:8px; display:flex; justify-content:center; align-items:center; padding:0;">
+            <canvas id="tc-canvas" style="max-width:100%; max-height:60vh; touch-action:none; cursor:move; display:block;"></canvas>
+          </div>
+        </div>
+        <div style="flex:1 1 300px; min-width:260px; display:flex; flex-direction:column; gap:10px;">
+          <div style="display:flex; gap:6px;">
+            <button class="btn" id="tc-add" style="flex:1; justify-content:center;">Add images…</button>
+            <input type="file" id="tc-file" accept="image/*" multiple style="display:none">
+          </div>
+          <div id="tc-list" style="display:flex; flex-direction:column; gap:4px; max-height:150px; overflow-y:auto;"></div>
+          <div id="tc-props" style="display:none; flex-direction:column; gap:6px; border:1px solid var(--line); border-radius:8px; padding:8px;">
+            <label style="font-size:11px; color:var(--text-1);">Scale <input type="range" id="tc-scale" min="2" max="300" step="1" style="width:100%"></label>
+            <label style="font-size:11px; color:var(--text-1);">Rotation <input type="range" id="tc-rot" min="-180" max="180" step="1" style="width:100%"></label>
+            <label style="font-size:11px; color:var(--text-1);">Opacity <input type="range" id="tc-opa" min="0" max="100" step="1" style="width:100%"></label>
+            <div style="display:flex; gap:6px;">
+              <button class="btn" id="tc-up" title="Bring forward" style="flex:1; justify-content:center;">Forward</button>
+              <button class="btn" id="tc-down" title="Send backward" style="flex:1; justify-content:center;">Back</button>
+              <button class="btn" id="tc-flip" style="flex:1; justify-content:center;">Flip</button>
+              <button class="btn" id="tc-del" style="flex:1; justify-content:center;">Delete</button>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-1);">
+            <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="tc-bgon"> Background</label>
+            <input type="color" id="tc-bg" style="width:34px; height:26px; padding:0; border:1px solid var(--line); background:none;">
+            <span style="font-size:10.5px; color:var(--text-2);">Off = transparent</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-1);">
+            Apply to
+            <select id="tc-target" style="flex:1; ${inp}">
+              <option value="all">Whole object</option>
+              ${isBox ? FACE_ORDER.map(f => `<option value="${f}">${FACE_LABEL[f]} only</option>`).join('') : ''}
+            </select>
+          </div>
+          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:auto;">
+            <button class="btn" id="tc-cancel">Close</button>
+            <button class="btn primary" id="tc-apply" style="background:var(--accent); color:#1a1a1a; border-color:var(--accent);">Apply texture</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const $ = (id) => overlay.querySelector('#' + id);
+  const cnv = $('tc-canvas'), ctx = cnv.getContext('2d');
+  let sel = st.layers.length ? st.layers.length - 1 : -1;
+
+  // Canvas shape follows the target: square for the whole object, the face's own aspect for one face.
+  function canvasSize() {
+    let aspect = 1;
+    if (isBox && st.target !== 'all') aspect = Math.max(0.5, Math.min(2, faceAspectRatio(obj, st.target)));
+    const B = 1024;
+    return aspect >= 1 ? { w: B, h: Math.round(B / aspect) } : { w: Math.round(B * aspect), h: B };
+  }
+  function layerBox(L) {
+    const w = L.scale * cnv.width, h = w * (L.img.naturalHeight || L.img.height) / (L.img.naturalWidth || L.img.width);
+    return { w, h };
+  }
+  function draw(preview) {
+    ctx.clearRect(0, 0, cnv.width, cnv.height);
+    if (st.bgOn) { ctx.fillStyle = st.bg; ctx.fillRect(0, 0, cnv.width, cnv.height); }
+    st.layers.forEach((L, i) => {
+      const { w, h } = layerBox(L);
+      ctx.save();
+      ctx.globalAlpha = L.opacity;
+      ctx.translate(L.x * cnv.width, L.y * cnv.height);
+      ctx.rotate(L.rot * Math.PI / 180);
+      ctx.scale(L.flip ? -1 : 1, 1);
+      ctx.drawImage(L.img, -w / 2, -h / 2, w, h);
+      ctx.restore();
+    });
+    if (preview && sel >= 0 && st.layers[sel]) {
+      const L = st.layers[sel], { w, h } = layerBox(L);
+      ctx.save();
+      ctx.translate(L.x * cnv.width, L.y * cnv.height);
+      ctx.rotate(L.rot * Math.PI / 180);
+      ctx.lineWidth = Math.max(2, cnv.width / 300);
+      ctx.strokeStyle = '#ff8a3d';
+      ctx.setLineDash([cnv.width / 60, cnv.width / 100]);
+      ctx.strokeRect(-w / 2, -h / 2, w, h);
+      ctx.restore();
+    }
+  }
+  function resizeCanvas() {
+    const sz = canvasSize();
+    cnv.width = sz.w; cnv.height = sz.h;
+    cnv.style.aspectRatio = sz.w + '/' + sz.h;
+    cnv.style.width = Math.min(460, sz.w * 0.45) + 'px';
+    draw(true);
+  }
+  function renderList() {
+    const list = $('tc-list');
+    list.innerHTML = '';
+    // Top-most layer first, like a layers panel.
+    for (let i = st.layers.length - 1; i >= 0; i--) {
+      const L = st.layers[i];
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; cursor:pointer; border:1px solid ' + (i === sel ? 'var(--accent)' : 'var(--line)') + '; background:' + (i === sel ? 'var(--accent-dim)' : 'var(--bg-2)') + ';';
+      const th = document.createElement('img');
+      th.src = L.img.src; th.style.cssText = 'width:26px; height:26px; object-fit:cover; border-radius:4px;';
+      const nm = document.createElement('span');
+      nm.textContent = L.name; nm.style.cssText = 'font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;';
+      row.appendChild(th); row.appendChild(nm);
+      row.addEventListener('click', () => { sel = i; syncProps(); renderList(); draw(true); });
+      list.appendChild(row);
+    }
+  }
+  function syncProps() {
+    const L = sel >= 0 ? st.layers[sel] : null;
+    $('tc-props').style.display = L ? 'flex' : 'none';
+    if (!L) return;
+    $('tc-scale').value = Math.round(L.scale * 100);
+    $('tc-rot').value = Math.round(L.rot);
+    $('tc-opa').value = Math.round(L.opacity * 100);
+  }
+
+  $('tc-bgon').checked = st.bgOn; $('tc-bg').value = st.bg; $('tc-target').value = st.target;
+  $('tc-bgon').addEventListener('change', e => { st.bgOn = e.target.checked; draw(true); });
+  $('tc-bg').addEventListener('input', e => { st.bg = e.target.value; if (!st.bgOn) { st.bgOn = true; $('tc-bgon').checked = true; } draw(true); });
+  $('tc-target').addEventListener('change', e => { st.target = e.target.value; resizeCanvas(); });
+
+  // Add several images at once; each lands centred, sized to fit, slightly offset so they don't hide each other.
+  $('tc-add').addEventListener('click', () => { $('tc-file').value = ''; $('tc-file').click(); });
+  $('tc-file').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    for (const f of files) {
+      try {
+        const url = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(new Error('read')); fr.readAsDataURL(f); });
+        const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('decode')); im.src = url; });
+        const n = st.layers.length;
+        const ar = img.naturalHeight / img.naturalWidth;
+        const maxScale = Math.min(0.6, 0.6 * (cnv.height / cnv.width) / ar);
+        st.layers.push({ img, name: f.name, x: 0.5 + (n % 5) * 0.03, y: 0.5 + (n % 5) * 0.03, scale: Math.max(0.05, maxScale), rot: 0, opacity: 1, flip: false });
+        sel = st.layers.length - 1;
+      } catch (err) { showToast('Could not load ' + f.name, true); }
+    }
+    syncProps(); renderList(); draw(true);
+  });
+
+  const cur = () => (sel >= 0 ? st.layers[sel] : null);
+  $('tc-scale').addEventListener('input', e => { const L = cur(); if (L) { L.scale = parseFloat(e.target.value) / 100; draw(true); } });
+  $('tc-rot').addEventListener('input', e => { const L = cur(); if (L) { L.rot = parseFloat(e.target.value); draw(true); } });
+  $('tc-opa').addEventListener('input', e => { const L = cur(); if (L) { L.opacity = parseFloat(e.target.value) / 100; draw(true); } });
+  $('tc-flip').addEventListener('click', () => { const L = cur(); if (L) { L.flip = !L.flip; draw(true); } });
+  $('tc-del').addEventListener('click', () => { if (sel < 0) return; st.layers.splice(sel, 1); sel = st.layers.length ? Math.min(sel, st.layers.length - 1) : -1; syncProps(); renderList(); draw(true); });
+  $('tc-up').addEventListener('click', () => { if (sel >= 0 && sel < st.layers.length - 1) { [st.layers[sel], st.layers[sel + 1]] = [st.layers[sel + 1], st.layers[sel]]; sel++; renderList(); draw(true); } });
+  $('tc-down').addEventListener('click', () => { if (sel > 0) { [st.layers[sel], st.layers[sel - 1]] = [st.layers[sel - 1], st.layers[sel]]; sel--; renderList(); draw(true); } });
+
+  // Drag to move: pick the top-most layer under the pointer (inverse-transform hit test).
+  function toCanvas(ev) {
+    const r = cnv.getBoundingClientRect();
+    return { x: (ev.clientX - r.left) * cnv.width / r.width, y: (ev.clientY - r.top) * cnv.height / r.height };
+  }
+  function hit(px, py) {
+    for (let i = st.layers.length - 1; i >= 0; i--) {
+      const L = st.layers[i], { w, h } = layerBox(L);
+      const dx = px - L.x * cnv.width, dy = py - L.y * cnv.height, a = -L.rot * Math.PI / 180;
+      const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+      if (Math.abs(lx) <= w / 2 && Math.abs(ly) <= h / 2) return i;
+    }
+    return -1;
+  }
+  let drag = null;
+  cnv.addEventListener('pointerdown', (ev) => {
+    const p = toCanvas(ev), i = hit(p.x, p.y);
+    if (i < 0) return;
+    sel = i; const L = st.layers[i];
+    drag = { dx: L.x * cnv.width - p.x, dy: L.y * cnv.height - p.y };
+    cnv.setPointerCapture(ev.pointerId);
+    syncProps(); renderList(); draw(true);
+  });
+  cnv.addEventListener('pointermove', (ev) => {
+    if (!drag || !cur()) return;
+    const p = toCanvas(ev), L = cur();
+    L.x = (p.x + drag.dx) / cnv.width; L.y = (p.y + drag.dy) / cnv.height;
+    draw(true);
+  });
+  const endDrag = () => { drag = null; };
+  cnv.addEventListener('pointerup', endDrag); cnv.addEventListener('pointercancel', endDrag);
+  cnv.addEventListener('wheel', (ev) => {
+    const L = cur(); if (!L) return;
+    ev.preventDefault();
+    L.scale = Math.max(0.02, Math.min(3, L.scale * (ev.deltaY < 0 ? 1.06 : 1 / 1.06)));
+    syncProps(); draw(true);
+  }, { passive: false });
+
+  const close = () => overlay.remove();
+  $('tc-cancel').addEventListener('click', close);
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+
+  $('tc-apply').addEventListener('click', () => {
+    if (!st.layers.length && !st.bgOn) { showToast('Add at least one image first', true); return; }
+    draw(false);                                   // bake without the selection outline
+    const dataURL = cnv.toDataURL('image/png');
+    draw(true);
+    const baked = new Image();
+    baked.onload = () => {
+      try {
+        const live = objects.find(x => x.id === obj.id);
+        if (!live) return;
+        const targets = (st.target === 'all' && selectedSet.size > 1)
+          ? [...selectedSet].map(id => objects.find(x => x.id === id)).filter(Boolean)
+          : [live];
+        pushUndo();
+        animMatBeforeEdit(targets);
+        let first = true;
+        targets.forEach(t => {
+          const makeTex = () => {
+            const tex = new THREE.Texture(baked);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.userData.tile = false;             // composed textures are already laid out: stretch, don't repeat
+            tex.needsUpdate = true;
+            return tex;
+          };
+          const setMat = (m, tex) => {
+            const prev = m.map;
+            applyTextureModeToTexture(tex);
+            m.map = tex;
+            m.transparent = true;
+            m.color.set('#ffffff');                // otherwise the object's base colour tints the composition
+            applyAlphaCutout(m, tex);
+            m.needsUpdate = true;
+            if (prev && prev !== tex) prev.dispose();
+          };
+          const hasAlpha = (() => { const probe = makeTex(); return prepareAlphaTexture(probe); })();
+          if (st.target !== 'all' && t.type === 'box') {
+            const mats = ensureFaceMaterials(t);
+            const idx = FACE_ORDER.indexOf(st.target);
+            const tex = makeTex(); tex.userData.alphaChecked = true; tex.userData.hasAlpha = hasAlpha;
+            setMat(mats[idx], tex);
+            if (t.faceLabels) { delete t.faceLabels[st.target]; if (!Object.keys(t.faceLabels).length) t.faceLabels = null; }
+          } else {
+            const mats = Array.isArray(t.mesh.material) ? t.mesh.material : [t.mesh.material];
+            mats.forEach(m => {
+              const tex = makeTex(); tex.userData.alphaChecked = true; tex.userData.hasAlpha = hasAlpha;
+              setMat(m, tex);
+            });
+            t.faceLabels = null;
+          }
+          syncCutoutShadow(t.mesh);
+        });
+        animMatAfterEdit(targets);
+        targets.forEach(t => refreshTiles(t));
+        if (selectedSet.size === 1 && selected && transformControls.object !== selected.mesh) attachGizmoToSelection();
+        applySelectionOutlines();
+        refreshInspector();
+        showToast('Texture applied');
+        close();
+      } catch (err) {
+        console.error('Compose texture failed', err);
+        showToast('Apply failed: ' + err.message, true);
+      }
+    };
+    baked.onerror = () => showToast('Could not bake the texture', true);
+    baked.src = dataURL;
+  });
+
+  resizeCanvas(); renderList(); syncProps();
 }
 
 // Opens the face-texture builder: a textbox for the label plus a 6-way face picker,
