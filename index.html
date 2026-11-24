@@ -3371,6 +3371,20 @@ function refreshInspector() {
           <button class="btn" id="f-tile-reset" title="Reset to the image's native aspect ratio" style="padding:6px 8px;">Reset</button>
         </div>
       </div>
+      ${o.type === 'box' ? `
+      <div class="field-label">Images per face</div>
+      <div class="color-row" style="gap:6px;">
+        <select id="f-face-img-face" title="Which face gets the image. If you pick several files, they fill the following faces in order." style="flex:1; min-width:0; padding:6px; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; color:var(--text-0);">
+          ${FACE_ORDER.map(f => `<option value="${f}">${FACE_LABEL[f]}${(Array.isArray(o.mesh.material) && o.mesh.material[FACE_ORDER.indexOf(f)] && o.mesh.material[FACE_ORDER.indexOf(f)].map && !o.mesh.material[FACE_ORDER.indexOf(f)].map.isTextTexture) ? ' \u25CF' : ''}</option>`).join('')}
+        </select>
+        <button class="btn" id="f-face-img-add" title="Add an image to the chosen face (select several files to fill consecutive faces)" style="justify-content:center;">Add image</button>
+      </div>
+      ${Array.isArray(o.mesh.material) && o.mesh.material.some(m => m.map && !m.map.isTextTexture) ? `
+        <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
+          ${FACE_ORDER.map((f, i) => { const m = o.mesh.material[i]; return (m && m.map && !m.map.isTextTexture) ? `<span class="f-face-img-chip" data-face="${f}" title="Remove the image on ${FACE_LABEL[f]}" style="cursor:pointer; font-size:10.5px; padding:3px 7px; border:1px solid var(--line); border-radius:10px; background:var(--bg-2); color:var(--text-1);">${FACE_LABEL[f]} \u2715</span>` : ''; }).join('')}
+        </div>` : ''}
+      <input type="file" id="f-face-img-input" accept="image/*" multiple style="display:none">
+      ` : ''}
       <input type="file" id="f-tex-input" accept="image/*" style="display:none">
 
       <div class="field-label">Collision</div>
@@ -3705,6 +3719,96 @@ function refreshInspector() {
     animMatAfterEdit(_clr);
     refreshInspector();
   });
+
+  // ---- Multiple images on one object: one image per box face ----
+  const faceImgSel = document.getElementById('f-face-img-face');
+  const faceImgInp = document.getElementById('f-face-img-input');
+  if (faceImgSel && faceImgInp) {
+    document.getElementById('f-face-img-add').addEventListener('click', () => {
+      endResizeDrag();
+      faceImgInp.value = '';
+      faceImgInp.click();
+    });
+    const readAsDataURL = (file) => new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => rej(new Error('Could not read ' + file.name));
+      fr.readAsDataURL(file);
+    });
+    const loadTexture = (url, name) => new Promise((res, rej) => {
+      new THREE.TextureLoader().load(url, res, undefined, () => rej(new Error('Could not load ' + name)));
+    });
+    faceImgInp.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files || []).slice(0, FACE_ORDER.length);
+      e.target.value = '';
+      if (!files.length) return;
+      const startIdx = Math.max(0, FACE_ORDER.indexOf(faceImgSel.value));
+      let live = null;
+      try {
+        const textures = [];
+        for (const f of files) textures.push(await loadTexture(await readAsDataURL(f), f.name));
+        // Re-resolve after the async loads: undo/redo may have rebuilt the mesh meanwhile.
+        live = objects.find(x => x.id === o.id);
+        if (!live || live.type !== 'box') return;
+        pushUndo();
+        animMatBeforeEdit([live]);
+        const mats = ensureFaceMaterials(live);
+        textures.forEach((tex, k) => {
+          const idx = (startIdx + k) % FACE_ORDER.length;
+          const face = FACE_ORDER[idx];
+          const m = mats[idx];
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.userData.tile = nextImageTile;
+          const hasAlpha = prepareAlphaTexture(tex);
+          applyTextureModeToTexture(tex);
+          tex.needsUpdate = true;
+          const old = m.map;
+          m.map = tex;
+          m.transparent = true;
+          if (hasAlpha) m.color.set('#ffffff');
+          applyAlphaCutout(m, tex);
+          m.needsUpdate = true;
+          // Only free the old texture if no other face is still using it (whole-object skins share one).
+          if (old && old !== tex && !mats.some((x, j) => j !== idx && x.map === old)) old.dispose();
+          if (live.faceLabels) {               // an image replaces any text label on that face
+            delete live.faceLabels[face];
+            if (Object.keys(live.faceLabels).length === 0) live.faceLabels = null;
+          }
+        });
+        syncCutoutShadow(live.mesh);
+        animMatAfterEdit([live]);
+        if (files.length > 1) showToast(`Added ${files.length} images`);
+      } catch (err) {
+        console.error('Face image failed', err);
+        showToast('Image failed: ' + err.message, true);
+      } finally {
+        if (live) refreshTiles(live);
+        if (selectedSet.size === 1 && selected && transformControls.object !== selected.mesh) attachGizmoToSelection();
+        applySelectionOutlines();
+        refreshInspector();
+      }
+    });
+    document.querySelectorAll('.f-face-img-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const live = objects.find(x => x.id === o.id);
+        if (!live || !Array.isArray(live.mesh.material)) return;
+        const idx = FACE_ORDER.indexOf(chip.dataset.face);
+        pushUndo();
+        animMatBeforeEdit([live]);
+        const m = live.mesh.material[idx];
+        const shared = live.mesh.material.some((x, j) => j !== idx && x.map === m.map);
+        if (shared) m.map = null; else removeFaceTexture(live, chip.dataset.face);
+        m.alphaTest = 0;
+        m.transparent = m.opacity < 0.99;
+        m.depthWrite = m.opacity >= 0.99;
+        m.needsUpdate = true;
+        syncCutoutShadow(live.mesh);
+        animMatAfterEdit([live]);
+        refreshTiles(live);
+        refreshInspector();
+      });
+    });
+  }
 
   document.getElementById('f-text-face').addEventListener('click', () => showTextFaceModal(o));
 }
